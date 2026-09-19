@@ -110,9 +110,21 @@ Backup before large moves: desktop `GodViewer-backup-pre-optimize-*` +
 - Rule mirror is **broadcast-only** best-effort. Do **not** re-add Service/ContentProvider cold-start
   delivery unless the user explicitly asks (already tried and reverted). Soft token:
   `godviewer-rule-mirror-v1`.
-- Host entry/control: `EntryMode` (`target` vs `host`), `HostPrefs` + `HostPrefsProvider`
+- Host entry/control: `EntryMode` (`target` vs `host` vs `none`), `HostPrefs` + `HostPrefsProvider`
   (`content://com.godviewer.app.hostprefs/...`), control token `godviewer-host-control-v1`
   (soft guard, not crypto).
+- `EntryMode.NONE`: never post the target-app notification (rules still replay — replay lives in
+  `ActivityLifecycleHooker`, decoupled from notifications). Reachable from the **「Hide」button on
+  either notification** — target: `EditModeNotification.ACTION_HIDE`; host:
+  `HostControlNotifier.ACTION_HIDE` (both exit edit mode so touch interception cannot linger) —
+  and from the host settings picker; target → host writeback is
+  `HostControlBridge.ACTION_SET_ENTRY_MODE` (best-effort, same as rule mirror).
+  Both notifications share the same contract: tapping the body toggles edit mode
+  (`ACTION_TOGGLE` / `HostControlBridge.ACTION_TOGGLE_EDIT`), the body text states the current
+  mode and what a tap will do, and **Hide is the first action** (SystemUI renders at most 3).
+  The 600 ms `scheduleConfirmFallback` in `EditModeNotification` must use
+  `shouldShowTargetNotification()` — using `isHostEntryInTarget()` makes a hidden notification
+  reappear on cold start.
 - Do **not** restore deleted AppList* UI (`AppListActivity` / adapters / layouts).
 - Keep load-bearing misspellings: `PupupWindowHooker.kt`, `VeiwUtil.kt`.
 - Logging: prefer `GvLog` (`GodViewer.<tag>`, forwarded to the framework log via the sink
