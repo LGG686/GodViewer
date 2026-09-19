@@ -45,6 +45,16 @@ object TargetControlReceiver {
                         // setEnabled 内部会 refreshActivity / unwrap 或 wrap
                         EditMode.setEnabled(true)
                     }
+                    HostControlBridge.ACTION_TOGGLE_EDIT -> {
+                        // 点通知本体 = 开关：宿主不知道目标的真实状态时会用它
+                        val next = !EditMode.isEnabled()
+                        GvLog.i(TAG, "toggle edit received -> $next")
+                        EditMode.setEnabled(next)
+                    }
+                    HostControlBridge.ACTION_DISABLE_EDIT -> {
+                        GvLog.i(TAG, "disable edit received")
+                        EditMode.setEnabled(false)
+                    }
                     HostControlBridge.ACTION_UNDO -> {
                         val activity = ActivityLifecycleHooker.resumedActivity()
                         val undone = ViewRuleManager.undoLastOperation(activity)
@@ -77,6 +87,8 @@ object TargetControlReceiver {
         }
         val filter = IntentFilter().apply {
             addAction(HostControlBridge.ACTION_ENABLE_EDIT)
+            addAction(HostControlBridge.ACTION_TOGGLE_EDIT)
+            addAction(HostControlBridge.ACTION_DISABLE_EDIT)
             addAction(HostControlBridge.ACTION_UNDO)
             addAction(HostControlBridge.ACTION_MANAGE_RULES)
             addAction(EntryMode.ACTION_ENTRY_MODE_CHANGED)

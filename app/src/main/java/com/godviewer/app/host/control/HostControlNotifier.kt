@@ -16,17 +16,20 @@ import com.godviewer.app.shared.entry.EntryMode
 import com.godviewer.app.shared.immutableFlag
 
 /**
- * 本体入口的常驻控制通知：
- * 点击通知体 /「开启」= 目标未开编辑则开启，已开则仅刷新状态（不跳转 GodViewer）；
- * 另有撤销、规则管理操作。
+ * 本体入口的常驻控制通知（与目标应用内通知形态保持一致）：
+ * - 点击通知体 = 开关编辑模式（开↔关），不再只是「开启」
+ * - 正文实时显示当前模式及点击后果（点击关闭 / 点击开启）
+ * - 按钮：隐藏（第 1 位）/ 撤销 / 管理规则
  */
 object HostControlNotifier {
     private const val TAG = "Control"
     private const val CHANNEL_ID = "godviewer_host_control"
     private const val NOTIFICATION_ID = 41001
 
-    /** 点击通知体或「开启」：未开编辑则开启，已开则 no-op 刷新 */
-    const val ACTION_ENABLE = "com.godviewer.app.action.HOST_ENABLE_EDIT"
+    /** 点击通知体 = 开关编辑模式 */
+    const val ACTION_TOGGLE = "com.godviewer.app.action.HOST_TOGGLE_EDIT"
+    /** 「隐藏」按钮：入口模式改为不显示通知，并退出目标编辑模式 */
+    const val ACTION_HIDE = "com.godviewer.app.action.HOST_HIDE_ENTRY"
     const val ACTION_UNDO = "com.godviewer.app.action.HOST_UNDO"
     const val ACTION_MANAGE_RULES = "com.godviewer.app.action.HOST_MANAGE_RULES"
 
@@ -49,34 +52,42 @@ object HostControlNotifier {
             ensureChannel(app)
 
             val target = HostControlBridge.currentTarget(app)
+            // 正文实时反映当前模式，并说明点击后会做什么（与目标应用内通知一致）
             val contentText = if (target == null) {
                 app.getString(R.string.host_control_no_target_text)
             } else {
-                val state = app.getString(
-                    if (target.editEnabled) R.string.edit_mode_on else R.string.edit_mode_off,
+                app.getString(
+                    if (target.editEnabled) {
+                        R.string.host_control_tap_to_disable_text
+                    } else {
+                        R.string.host_control_tap_to_enable_text
+                    },
+                    target.label,
                 )
-                app.getString(R.string.host_control_target_text, target.label, state)
             }
 
-            // 与目标通知一致：点通知体 = 开启/刷新编辑，不打开宿主 Activity
-            val enablePending = actionPending(app, ACTION_ENABLE, 1)
+            // 点通知体 = 开关编辑模式，不打开宿主 Activity
+            val togglePending = actionPending(app, ACTION_TOGGLE, 1)
             val undoPending = actionPending(app, ACTION_UNDO, 2)
             val managePending = actionPending(app, ACTION_MANAGE_RULES, 3)
+            val hidePending = actionPending(app, ACTION_HIDE, 4)
 
             val builder = NotificationCompat.Builder(app, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_godviewer)
                 .setContentTitle(app.getString(R.string.host_control_notification_title))
                 .setContentText(contentText)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(contentText))
-                .setContentIntent(enablePending)
+                .setContentIntent(togglePending)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                // 「隐藏」放在第一个 action 位：系统最多渲染 3 个按钮，
+                // 这个位置此前渲染的是「开启」，用户设备上已验证可见
                 .addAction(
-                    android.R.drawable.ic_menu_edit,
-                    app.getString(R.string.edit_mode_enable),
-                    enablePending,
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    app.getString(R.string.edit_mode_hide),
+                    hidePending,
                 )
                 .addAction(
                     android.R.drawable.ic_menu_revert,

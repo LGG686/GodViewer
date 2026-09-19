@@ -4,6 +4,7 @@ import android.app.Activity
 import android.view.ViewTreeObserver
 import com.godviewer.app.shared.GvLog
 import com.godviewer.app.target.dialog.ModuleDialogUi
+import com.godviewer.app.target.edit.EditModeNotification
 import com.godviewer.app.target.edit.SelectedViewHighlight
 import com.godviewer.app.target.hook.GvHook
 import com.godviewer.app.target.hook.GvMethodHook
@@ -58,6 +59,9 @@ class ActivityLifecycleHooker : IHooker {
                         ModuleDialogUi.noteResumedActivity(activity)
                         replay(activity, captureThumbs = true)
                         registerLayoutListener(activity)
+                        // 回到前台时按宿主最新入口模式刷新通知：
+                        // 宿主改设置后的广播可能漏投，这里兜底撤掉已隐藏的通知
+                        EditModeNotification.refresh(activity.application)
                     }.onFailure {
                         GvLog.e(TAG, "onPostResume hook failed", it)
                     }
