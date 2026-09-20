@@ -2,11 +2,13 @@ package com.godviewer.app.target.rule
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.view.View
 import android.widget.TextView
 import com.godviewer.app.shared.GvLog
 import com.godviewer.app.shared.model.ViewRule
+import com.godviewer.app.target.mirror.ThumbnailSync
 import com.godviewer.app.target.rule.findViewBestMatch
 import com.godviewer.app.target.rule.getAttachedActivityFromView
 import com.godviewer.app.target.rule.getViewHierarchyDepth
@@ -35,6 +37,9 @@ object ViewRuleManager {
     private var initialized = false
     private var store: RuleStore? = null
 
+    /** 目标进程 context（缩略图回补 / 镜像同步需要，非 UI 用途）。 */
+    private var appContext: Context? = null
+
     @Volatile
     private var rules: List<ViewRule> = emptyList()
 
@@ -51,6 +56,7 @@ object ViewRuleManager {
         // 先置位，避免 init 中异常导致反复进入；失败时 rules 保持空列表
         initialized = true
         runCatching {
+            appContext = application.applicationContext
             ViewRuleThumbnails.attach(application.applicationContext)
             val ruleStore = RuleStore(application.applicationContext)
             store = ruleStore
@@ -107,14 +113,18 @@ object ViewRuleManager {
 
     fun thumbnailFor(rule: ViewRule): Bitmap? = ViewRuleThumbnails.thumbnailFor(rule)
 
-    fun captureThumbnail(view: View, rule: ViewRule) {
+    /** @return 本次是否新抓到缩略图 */
+    fun captureThumbnail(view: View, rule: ViewRule): Boolean =
         ViewRuleThumbnails.capture(view, rule)
-    }
 
     /** 保存（或更新）一条规则 */
     fun saveRule(rule: ViewRule) {
         pushUndoState()
         rule.timestamp = System.currentTimeMillis()
+        // 在本机重新保存 = 用户已确认这条规则对应的控件：解除外来规则的严格匹配，
+        // 同时退出导入批次，避免「撤销本次导入」误删用户确认过的规则
+        rule.imported = false
+        rule.batchId = null
         ViewRuleApplier.forgetAppliedImage(rule)
         val index = rules.indexOfFirst { it.key() == rule.key() }
         rules = if (index >= 0) {
@@ -133,6 +143,8 @@ object ViewRuleManager {
         ViewRuleThumbnails.remove(rule)
         rules = rules.filterNot { it.key() == rule.key() }
         store?.save(rules)
+        // 删除后回推一次全量 key 列表：宿主从镜像里清掉已删规则的缩略图
+        appContext?.let { ThumbnailSync.syncKeySetAfterDelete(it, rules) }
         GvLog.d(TAG, "rule deleted: ${rule.key()}")
     }
 
@@ -146,6 +158,70 @@ object ViewRuleManager {
             }
         }
         deleteRule(rule)
+    }
+
+    /**
+     * 备份导入：与现有规则按键（activityClass + viewClass + depth）合并，
+     * 同键取 `timestamp` 较新的那条，本地独有的规则保留。
+     *
+     * 导入的规则统一置 [ViewRule.imported] 并打上 [batchId]：原设备的布局未必与本机
+     * 一致，匹配时只认身份锚点（见 [findViewBestMatch]），且整批可撤销。
+     *
+     * @return (新增条数, 覆盖条数)
+     */
+    fun importRules(incoming: List<ViewRule>, batchId: String? = null): Pair<Int, Int> {
+        if (incoming.isEmpty()) return 0 to 0
+        pushUndoState()
+        val merged = rules.toMutableList()
+        var added = 0
+        var replaced = 0
+        for (rule in incoming) {
+            rule.imported = true
+            rule.batchId = batchId
+            val index = merged.indexOfFirst { it.key() == rule.key() }
+            if (index < 0) {
+                merged.add(rule)
+                added++
+            } else if (rule.timestamp >= merged[index].timestamp) {
+                merged[index] = rule
+                replaced++
+            }
+        }
+        rules = merged
+        store?.save(rules)
+        GvLog.i(TAG, "rules imported: added=$added replaced=$replaced total=${rules.size}")
+        return added to replaced
+    }
+
+    /**
+     * 撤销一整批导入：移除该批次全部规则并持久化（宿主侧镜像由宿主自行重写）。
+     *
+     * [restoreIn] 里的 Activity 会先把这些规则改过的视图还原（被隐藏的重新出现）。
+     *
+     * @return 移除的条数
+     */
+    fun undoImport(batchId: String?, restoreIn: Collection<Activity> = emptyList()): Int {
+        if (batchId.isNullOrBlank()) return 0
+        val batch = rules.filter { it.batchId == batchId }
+        if (batch.isEmpty()) return 0
+        pushUndoState()
+        for (rule in batch) {
+            for (activity in restoreIn) {
+                runCatching {
+                    findViewBestMatch(activity, rule)?.let { ViewRuleApplier.restoreView(it, rule) }
+                }.onFailure {
+                    GvLog.w(TAG, "restore on undo import failed key=${rule.key()}", it)
+                }
+            }
+            ViewRuleApplier.forgetAppliedImage(rule)
+            ViewRuleThumbnails.remove(rule)
+        }
+        rules = rules.filterNot { it.batchId == batchId }
+        store?.save(rules)
+        // 回推全量 key 列表：宿主从镜像里清掉这批规则的缩略图
+        appContext?.let { ThumbnailSync.syncKeySetAfterDelete(it, rules) }
+        GvLog.i(TAG, "import undone: batch=$batchId removed=${batch.size}")
+        return batch.size
     }
 
     /** 当前全部规则（规则管理列表使用） */

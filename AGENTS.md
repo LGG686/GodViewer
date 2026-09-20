@@ -109,11 +109,65 @@ Backup before large moves: desktop `GodViewer-backup-pre-optimize-*` +
 - Persistence uses version-sensitive reflection (`ReflectUtil`, `ListenerInfo`,
   `View.mAttachInfo.mDebugLayout`, etc.) — stay API-safe. Corrupt `rules.json` → empty list;
   **never crash the target app**. ImageView original URL is not fully recoverable on reset.
-- Rule match: activityClass + hierarchy `depth[]` + viewClass, with resourceName/text fallbacks,
-  guarded by `matchVersionCode`.
+- Rule match (`target/rule/ViewRuleUtil.findViewBestMatch`): activityClass + hierarchy `depth[]`
+  + viewClass, with resourceName/text fallbacks, guarded by `matchVersionCode`. **`depth` is a
+  position, not an identity** — drop one view anywhere above the target and every following
+  sibling index shifts, so the path silently points at another control. Therefore:
+  - local rule + unchanged app version → position trusted, depth hit is enough
+  - version changed → depth hit additionally requires the resource name to match
+  - **imported rule** (`ViewRule.imported`) → depth hit requires a non-empty resource name that
+    matches; no resource name means it falls through to the resourceName/text fallbacks. It never
+    accepts a bare positional hit, because a same-version app on another phone can still have a
+    different layout (channel build, A/B flag, account state, screen class, dynamic list data).
+  Saving a rule locally clears `imported`/`batchId` — the user has confirmed the control.
+- Replay captures thumbnails **before** applying the rule: hiding sets the view to `GONE`, and
+  `ViewSnapshot.capture` returns null for `GONE`. Capturing afterwards would mean hidden rules
+  never get a picture (imported ones would show the placeholder forever).
 - Rule mirror is **broadcast-only** best-effort. Do **not** re-add Service/ContentProvider cold-start
   delivery unless the user explicitly asks (already tried and reverted). Soft token:
   `godviewer-rule-mirror-v1`.
+- Mirror thumbnails travel in their own `ACTION_MIRROR_THUMBS` batches, never inside the rules
+  broadcast: a batch carries at most `MAX_THUMB_BATCH_BYTES` and several batches are sent until
+  every rule with a thumbnail has been pushed. `thumbnails_mode` is `merge` (write / overwrite)
+  or `replace` (drop files outside the announced key set, values left empty = "keep only, do not
+  write"); deleting a rule pushes the full remaining key set with `replace` to prune orphans.
+  Replay-captured thumbnails are pushed back on a 10-minute throttle (`target.mirror.ThumbnailSync`)
+  so mirrors missing images heal themselves. Thumbnails are encoded as JPEG on a white matte at
+  128px — do **not** switch icons to JPEG, they need alpha.
+- Rule backup (`shared/backup/RuleBackupModels`, `host/backup/*`): one **zip**,
+  `manifest.json` (`format: "godviewer-backup"`, `schema_version: 1`, `container: "zip"`) plus
+  `packages/<pkg>/rules.json` and `packages/<pkg>/thumbnails/<key>.png|.jpg` stored raw with
+  `STORED` (they are already PNG/JPEG — deflating them gains nothing). Contents are rules +
+  thumbnails **only** — never settings (the hidden-app-icon toggle must not travel between
+  devices) and never app icons (PackageManager provides them). Thumbnail keys are the same short
+  hashes used by the mirror directory, so they land straight into `mirror/<pkg>/thumbs/<key>.png`.
+  Import still reads the old single-file JSON container (base64 thumbnails) — sniffed by zip
+  magic, not by extension. Read side is guarded: entry count, uncompressed byte budget, `..` /
+  absolute paths rejected.
+  Restore merges by rule key keeping the newer `timestamp`, writes the mirror, then delivers with
+  `HostControlBridge.ACTION_IMPORT_RULES` — an **explicit package** broadcast, deliberately not
+  `dispatchToTarget()` (that one needs a "last target" record the user may never have created).
+  A running target writes and replays immediately; a pending copy in
+  `filesDir/godviewer/backup_pending/<pkg>.json` is re-delivered when the target next reports
+  foreground (`HostControlReceiverImpl` → `RuleBackupDelivery.flush`), which is what makes
+  restore-after-reinstall and phone switches work. Re-delivery is idempotent by design.
+- Restore delivers **only the incoming rules**, never the merged list — otherwise locally created
+  rules would be re-stamped as imported (breaking their matching) and become eligible for
+  "undo last restore". Each restore gets a `batchId` stamped on every rule it delivers; the host
+  remembers it in `godviewer_backup` prefs so `RuleBackupImporter.undoLast` can strip that batch
+  from the mirror (dropping the package dir entirely when nothing stays) and broadcast
+  `ACTION_UNDO_IMPORT`. The target removes the batch, restores the affected views in live
+  activities, and pushes the remaining key set so mirror thumbnails get pruned.
+- Restore also carries thumbnails: `ACTION_IMPORT_THUMBS` batches (`ThumbPayload`: key → base64)
+  land in the target's own `files/godviewer/thumbnails/<key>.png`, which is what the rule manager
+  dialog reads. Without this, restored rules have no picture at all — the host mirror has one, but
+  the in-target dialog does not share that storage.
+- Rule backup / restore ships **knowingly unfinished** (documented as such in the changelog and in
+  the restore preview dialog): matching still depends on the anchors a control happens to have, so
+  a rule with neither resource name nor text silently does not apply, and a sufficiently different
+  layout can still point at a neighbour. Do not quietly drop those caveats from user-facing copy
+  — `Undo last restore` is the escape hatch and every mention of the feature should keep it
+  visible.
 - Host entry/control: `EntryMode` (`target` vs `host` vs `none`), `HostPrefs` + `HostPrefsProvider`
   (`content://com.godviewer.app.hostprefs/...`), control token `godviewer-host-control-v1`
   (soft guard, not crypto).

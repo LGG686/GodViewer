@@ -27,6 +27,7 @@ import java.io.FileOutputStream
 internal object RuleMirrorStore {
     private const val TAG = "Mirror"
     private val gson: Gson = GsonBuilder().create()
+    private val THUMB_KEY_REGEX = Regex("^[a-f0-9]{8,64}$")
 
     fun writeMirror(context: Context, packageName: String, json: String): Boolean {
         val safePkg = sanitizeMirrorPackageName(packageName) ?: return false
@@ -97,6 +98,169 @@ internal object RuleMirrorStore {
             GvLog.d(TAG, "mirror written: $pkg rules=${rules.size} label=${stored.appLabel}")
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * 只写缩略图的独立批次（[RuleMirrorProtocol.ACTION_MIRROR_THUMBS]）。
+     *
+     * - merge：只写 / 覆盖，不清删已有文件（分批推送用）
+     * - replace：清删不在本批 key 集合内的旧文件；value 留空表示「只声明保留、不写文件」
+     *   （删除规则后目标回推的全量 key 列表走这条）
+     *
+     * 该包还没有 rules.json 时忽略，避免为未同步的包建出孤儿目录。
+     */
+    fun writeThumbBatch(context: Context, packageName: String, json: String): Boolean {
+        val safePkg = sanitizeMirrorPackageName(packageName) ?: return false
+        if (json.isBlank() || json.length > 2 * 1024 * 1024) {
+            return false
+        }
+        val parsed = runCatching {
+            gson.fromJson(json, MirrorFile::class.java)
+        }.getOrNull() ?: return false
+        val pkg = sanitizeMirrorPackageName(parsed.packageName ?: safePkg) ?: return false
+        val thumbs = parsed.thumbnails
+        if (thumbs.isNullOrEmpty()) {
+            return false
+        }
+        return runCatching {
+            val dir = packageDir(context, pkg)
+            if (!File(dir, RuleMirrorProtocol.RULES_FILE).exists()) {
+                GvLog.d(TAG, "thumb batch ignored: no rules yet for $pkg")
+                return@runCatching false
+            }
+            val thumbDir = File(dir, RuleMirrorProtocol.THUMB_DIR)
+            if (!thumbDir.exists()) thumbDir.mkdirs()
+            if (parsed.thumbnailsMode == RuleMirrorProtocol.THUMB_MODE_REPLACE) {
+                val keep = thumbs.keys
+                thumbDir.listFiles()?.forEach { f ->
+                    val name = f.name.removeSuffix(".png")
+                    if (name !in keep) f.delete()
+                }
+            }
+            var written = 0
+            thumbs.forEach { (key, b64) ->
+                if (b64.isBlank()) return@forEach
+                if (key.matches(THUMB_KEY_REGEX)) {
+                    RuleMirrorCodec.decodeBase64ToFile(b64, File(thumbDir, "$key.png"))
+                    written++
+                }
+            }
+            GvLog.d(
+                TAG,
+                "thumb batch: $pkg mode=${parsed.thumbnailsMode} " +
+                    "keys=${thumbs.size} written=$written",
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    /** 某包镜像里已落盘的缩略图（key → 文件），供备份导出读取。 */
+    /** 删除指定 key 的镜像缩略图（撤销导入 / 删除规则时清孤儿用）。 */
+    fun deleteThumbnails(context: Context, packageName: String, keys: Collection<String>): Int {
+        val safePkg = sanitizeMirrorPackageName(packageName) ?: return 0
+        val dir = File(packageDir(context, safePkg), RuleMirrorProtocol.THUMB_DIR)
+        if (!dir.exists()) return 0
+        var removed = 0
+        for (key in keys) {
+            if (!key.matches(THUMB_KEY_REGEX)) continue
+            val file = File(dir, "$key.png")
+            if (file.exists() && file.delete()) removed++
+        }
+        return removed
+    }
+
+    /** 删除整个包的镜像（规则 + 缩略图 + 图标）。 */
+    fun deletePackage(context: Context, packageName: String): Boolean {
+        val safePkg = sanitizeMirrorPackageName(packageName) ?: return false
+        return runCatching { packageDir(context, safePkg).deleteRecursively() }
+            .getOrDefault(false)
+    }
+
+    fun exportThumbnails(context: Context, packageName: String): Map<String, File> {
+        val safePkg = sanitizeMirrorPackageName(packageName) ?: return emptyMap()
+        val thumbDir = File(packageDir(context, safePkg), RuleMirrorProtocol.THUMB_DIR)
+        val out = LinkedHashMap<String, File>()
+        thumbDir.listFiles()?.forEach { f ->
+            val key = f.name.removeSuffix(".png")
+            if (key.matches(THUMB_KEY_REGEX)) {
+                out[key] = f
+            }
+        }
+        return out
+    }
+
+    /**
+     * 备份导入：写该包的规则 + 缩略图。
+     *
+     * [rules] 由调用方合并完毕（同键取新）；缩略图只写 / 覆盖，不清删已有文件。
+     */
+    fun importPackage(
+        context: Context,
+        packageName: String,
+        rules: List<ViewRule>,
+        thumbnails: Map<String, ByteArray>,
+        appLabel: String?,
+    ): Boolean {
+        val safePkg = sanitizeMirrorPackageName(packageName) ?: return false
+        if (rules.isEmpty()) {
+            return false
+        }
+        return runCatching {
+            val dir = packageDir(context, safePkg)
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            val rulesFile = File(dir, RuleMirrorProtocol.RULES_FILE)
+            val existingLabel = runCatching {
+                gson.fromJson(rulesFile.readText(), MirrorFile::class.java)
+            }.getOrNull()?.appLabel
+            val stored = MirrorFile(
+                schemaVersion = 1,
+                packageName = safePkg,
+                appLabel = appLabel?.takeIf { it.isNotBlank() }
+                    ?: existingLabel?.takeIf { it.isNotBlank() },
+                updatedAt = System.currentTimeMillis(),
+                appIconPngBase64 = null,
+                thumbnails = null,
+                rules = rules,
+            )
+            val tmp = File(dir, "${RuleMirrorProtocol.RULES_FILE}.tmp")
+            FileOutputStream(tmp).use { out ->
+                out.write(gson.toJson(stored).toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
+            if (!tmp.renameTo(rulesFile)) {
+                tmp.copyTo(rulesFile, overwrite = true)
+                tmp.delete()
+            }
+            if (thumbnails.isNotEmpty()) {
+                val thumbDir = File(dir, RuleMirrorProtocol.THUMB_DIR)
+                if (!thumbDir.exists()) thumbDir.mkdirs()
+                thumbnails.forEach { (key, bytes) ->
+                    if (bytes.isNotEmpty() && key.matches(THUMB_KEY_REGEX)) {
+                        writeThumbFile(File(thumbDir, "$key.png"), bytes)
+                    }
+                }
+            }
+            GvLog.d(
+                TAG,
+                "import written: $safePkg rules=${rules.size} thumbs=${thumbnails.size}",
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    /** 缩略图原样落盘（tmp + rename，避免半截文件）。 */
+    private fun writeThumbFile(target: File, bytes: ByteArray) {
+        val tmp = File(target.parentFile, "${target.name}.tmp")
+        FileOutputStream(tmp).use { out ->
+            out.write(bytes)
+            out.fd.sync()
+        }
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
+        }
     }
 
     fun listPackages(context: Context): List<MirroredPackage> {

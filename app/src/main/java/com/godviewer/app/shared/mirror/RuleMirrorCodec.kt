@@ -2,6 +2,7 @@ package com.godviewer.app.shared.mirror
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.util.Base64
@@ -34,6 +35,32 @@ internal object RuleMirrorCodec {
         val baos = ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.PNG, quality, baos)
         return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+    }
+
+    /**
+     * 缩略图专用编码：JPEG（白底合成，避免透明区变黑）。
+     *
+     * 同样 128px 下比 PNG 小 3–5 倍，广播批次能多装几倍，镜像缩略图更不容易被截断。
+     * 宿主落盘按内容解码（BitmapFactory 不看扩展名），与历史 PNG 文件可以共存。
+     */
+    fun bitmapToBase64Jpeg(bitmap: Bitmap, quality: Int): String {
+        val scaled = ViewSnapshot.scaleDown(bitmap, 128)
+        val opaque = flattenOnWhite(scaled)
+        val baos = ByteArrayOutputStream()
+        opaque.compress(Bitmap.CompressFormat.JPEG, quality, baos)
+        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+    }
+
+    /** 有 alpha 的位图合成到白底（JPEG 无 alpha 通道）。 */
+    private fun flattenOnWhite(source: Bitmap): Bitmap {
+        if (!source.hasAlpha()) return source
+        return runCatching {
+            val out = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawColor(Color.WHITE)
+            canvas.drawBitmap(source, 0f, 0f, null)
+            out
+        }.getOrDefault(source)
     }
 
     fun decodeBase64ToFile(b64: String?, file: File) {

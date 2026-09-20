@@ -25,6 +25,7 @@ import com.godviewer.app.shared.model.ViewRule
  */
 object RuleMirror {
     const val ACTION_MIRROR_RULES = RuleMirrorProtocol.ACTION_MIRROR_RULES
+    const val ACTION_MIRROR_THUMBS = RuleMirrorProtocol.ACTION_MIRROR_THUMBS
     const val EXTRA_PACKAGE = RuleMirrorProtocol.EXTRA_PACKAGE
     const val EXTRA_JSON = RuleMirrorProtocol.EXTRA_JSON
     const val EXTRA_TOKEN = RuleMirrorProtocol.EXTRA_TOKEN
@@ -36,6 +37,51 @@ object RuleMirror {
 
     fun writeMirror(context: Context, packageName: String, json: String): Boolean {
         return com.godviewer.app.host.mirror.RuleMirrorStore.writeMirror(context, packageName, json)
+    }
+
+    /** 宿主侧：写缩略图批次（merge / replace）。 */
+    fun writeThumbBatch(context: Context, packageName: String, json: String): Boolean {
+        return com.godviewer.app.host.mirror.RuleMirrorStore.writeThumbBatch(
+            context,
+            packageName,
+            json,
+        )
+    }
+
+    /** 宿主侧：某包镜像里已存在的缩略图（key → 文件），供备份导出使用。 */
+    fun exportThumbnails(context: Context, packageName: String): Map<String, java.io.File> {
+        return com.godviewer.app.host.mirror.RuleMirrorStore.exportThumbnails(context, packageName)
+    }
+
+    /** 宿主侧：导入时写入规则 + 缩略图原始字节（合并语义，不删已有图）。 */
+    fun importPackage(
+        context: Context,
+        packageName: String,
+        rules: List<ViewRule>,
+        thumbnails: Map<String, ByteArray>,
+        appLabel: String?,
+    ): Boolean {
+        return com.godviewer.app.host.mirror.RuleMirrorStore.importPackage(
+            context,
+            packageName,
+            rules,
+            thumbnails,
+            appLabel,
+        )
+    }
+
+    /** 宿主侧：删除指定 key 的镜像缩略图。 */
+    fun deleteThumbnails(context: Context, packageName: String, keys: Collection<String>): Int {
+        return com.godviewer.app.host.mirror.RuleMirrorStore.deleteThumbnails(
+            context,
+            packageName,
+            keys,
+        )
+    }
+
+    /** 宿主侧：删除整个包的镜像。 */
+    fun deletePackage(context: Context, packageName: String): Boolean {
+        return com.godviewer.app.host.mirror.RuleMirrorStore.deletePackage(context, packageName)
     }
 
     fun listPackages(context: Context): List<MirroredPackage> {

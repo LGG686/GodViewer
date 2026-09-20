@@ -8,8 +8,8 @@ plugins {
 // release：固定下面两个常量（发版时手动改）
 // debug：每次 assemble/install/bundle Debug 自动 +1，APK 与 BuildConfig 均为纯数字
 // release 基线高于 CI 产出的 debug 号（debug = 基线 + 1），保证 release 能覆盖安装
-def RELEASE_VERSION_CODE = 22
-def RELEASE_VERSION_NAME = "4.3.4"
+def RELEASE_VERSION_CODE = 23
+def RELEASE_VERSION_NAME = "4.3.5"
 
 def debugVersionFile = file("${projectDir}/debug-version.properties")
 def storedDebugCode = RELEASE_VERSION_CODE

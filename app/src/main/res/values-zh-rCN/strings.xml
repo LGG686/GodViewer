@@ -107,7 +107,7 @@
     <string name="settings_clear_diag_confirm">清空</string>
     <string name="settings_clear_diag_done">已清空</string>
     <string name="settings_clear_diag_failed">清空失败</string>
-    <string name="changelog_body">上帝视角 更新日志\n\n4.3.4\n• 新增「上帝模式」快捷设置磁贴（标准小磁贴）：一键隐藏 / 恢复编辑模式入口（在设置里添加，Android 7.0 及以上）\n• 磁贴切到「开」时会同时进入最近一个目标应用的编辑模式（设置里可关）\n• 隐藏入口时，所有正在运行的目标应用都会一并退出编辑模式，不会残留触摸拦截\n\n4.3.3\n• 新增「不显示通知」入口模式：规则定好后可隐藏编辑模式入口通知（上帝视角本体通知与目标应用通知均可），已保存的规则仍会生效\n• 通知第一个按钮为「隐藏」，点击立即隐藏入口通知并退出编辑模式，可在设置中重新开启\n• 点击通知即可开关编辑模式\n• 通知正文实时显示当前处于什么模式，以及点击后的效果\n\n4.3.2\n• 新增本体通知入口，针对不申请通知权限的目标应用（设置可切换）\n• 点选控件实时高亮，修改目标一目了然\n• 规则管理支持批量编辑：全选 / 多选、批量删除；规则列表新增视图缩略图\n• 新增应用内检查更新与「复制 / 清空调试日志」\n• 重写触控拦截逻辑，修复部分应用 hook 后无法触摸；点击判定尺度更小，精细操作更容易\n• 重写弹窗样式，对目标应用代码依赖更小\n• 更换 hook 方式（迁移到 libxposed API 102），更安全稳定\n• 修复已知 bug，适配更多常用应用\n\n3.3.2\n• 功能入口迁到上帝视角本体通知（开启 / 撤销 / 管理规则），目标应用不再需要通知权限\n• 编辑模式点击拦截更稳：Activity 触摸分发 + 强制可点刷新\n• 重新打开本体时清理过期目标应用状态\n• 注入弹窗隔离目标主题，配色与宿主 UI 统一；修复高级编辑页空白\n\n3.2.2\n• 捐赠页：微信 / 支付宝收款码\n• 二级页面顶栏与一级页标题对齐\n\n3.2.1 — 新 UI 版本\n• 宿主底部导航：主页 / 教程 / 规则 / 设置\n• 规则镜像列表（应用图标 + 详情页）\n• 设置：语言（跟随系统/中文/English）、隐藏桌面图标、检查更新、自动更新偏好、更新日志、用户协议\n• 全局水印与页签切换动画\n\n2.2.1\n• 限制预览图高度，大视图时编辑按钮仍可见\n\n2.2.0\n• 注入侧规则管理\n• 规则持久化，应用重启后自动回放</string>
+    <string name="changelog_body">上帝视角 更新日志\n\n4.3.5\n• 规则备份与恢复本次首发，仍是半成品（待完善）：设备 / 版本布局差异较大时，部分规则可能不生效、缩略图缺失，甚至识别到相近的控件，后续会继续优化；一旦发现有控件被误隐藏，可用「撤销上次恢复」一键还原\n• 新增规则备份与恢复：规则页一键导出为 ZIP 备份文件（缩略图按原图存进包内），换机或重装后一键恢复\n• 恢复按规则键合并，同名规则保留时间较新的那条；未安装的应用也会先保存规则，安装后首次启动自动生效\n• 目标应用正在运行时，恢复的规则立即生效；未运行时等它下次启动生效\n• 缩略图同步改为分批推送：规则多的应用不再丢失后面的缩略图，缺失的图会随使用自动补齐\n• 恢复的规则改为按资源名或文字匹配，不再按位置：来自其他手机的规则不会误隐藏本机上的其他控件\n• 恢复的规则会连同缩略图一起导入，控件被隐藏或不存在时也能看到原设备上拍的图\n• 规则页新增「撤销上次恢复」：一键移除上次恢复导入的全部规则\n\n4.3.4\n• 新增「上帝模式」快捷设置磁贴（标准小磁贴）：一键隐藏 / 恢复编辑模式入口（在设置里添加，Android 7.0 及以上）\n• 磁贴切到「开」时会同时进入最近一个目标应用的编辑模式（设置里可关）\n• 隐藏入口时，所有正在运行的目标应用都会一并退出编辑模式，不会残留触摸拦截\n\n4.3.3\n• 新增「不显示通知」入口模式：规则定好后可隐藏编辑模式入口通知（上帝视角本体通知与目标应用通知均可），已保存的规则仍会生效\n• 通知第一个按钮为「隐藏」，点击立即隐藏入口通知并退出编辑模式，可在设置中重新开启\n• 点击通知即可开关编辑模式\n• 通知正文实时显示当前处于什么模式，以及点击后的效果\n\n4.3.2\n• 新增本体通知入口，针对不申请通知权限的目标应用（设置可切换）\n• 点选控件实时高亮，修改目标一目了然\n• 规则管理支持批量编辑：全选 / 多选、批量删除；规则列表新增视图缩略图\n• 新增应用内检查更新与「复制 / 清空调试日志」\n• 重写触控拦截逻辑，修复部分应用 hook 后无法触摸；点击判定尺度更小，精细操作更容易\n• 重写弹窗样式，对目标应用代码依赖更小\n• 更换 hook 方式（迁移到 libxposed API 102），更安全稳定\n• 修复已知 bug，适配更多常用应用\n\n3.3.2\n• 功能入口迁到上帝视角本体通知（开启 / 撤销 / 管理规则），目标应用不再需要通知权限\n• 编辑模式点击拦截更稳：Activity 触摸分发 + 强制可点刷新\n• 重新打开本体时清理过期目标应用状态\n• 注入弹窗隔离目标主题，配色与宿主 UI 统一；修复高级编辑页空白\n\n3.2.2\n• 捐赠页：微信 / 支付宝收款码\n• 二级页面顶栏与一级页标题对齐\n\n3.2.1 — 新 UI 版本\n• 宿主底部导航：主页 / 教程 / 规则 / 设置\n• 规则镜像列表（应用图标 + 详情页）\n• 设置：语言（跟随系统/中文/English）、隐藏桌面图标、检查更新、自动更新偏好、更新日志、用户协议\n• 全局水印与页签切换动画\n\n2.2.1\n• 限制预览图高度，大视图时编辑按钮仍可见\n\n2.2.0\n• 注入侧规则管理\n• 规则持久化，应用重启后自动回放</string>
     <string name="user_agreement_body">用户协议\n\n上帝视角（GodViewer）是基于 GNU 通用公共许可证第 3 版（GPL-3.0）发布的免费开源软件。\n\n1. 本软件仅供学习、研究与个人调试使用。\n2. 你须自行对使用方式负责，包括遵守当地法律以及目标应用的服务条款。\n3. 禁止利用本模块侵害他人、非法绕过付费功能或传播恶意软件。\n4. 本软件按「现状」提供，不作任何担保。作者不对因使用导致的数据丢失、账号封禁或设备异常承担责任。\n5. 请优先自行编译，或从官方 GitHub 仓库下载安装包，避免来源不明的 APK。\n6. 使用本软件即表示你同意 GPL-3.0 许可条款及上述注意事项。\n\n完整许可证：https://www.gnu.org/licenses/gpl-3.0.html\n源码：https://github.com/tobbytian/GodViewer</string>
     <string name="status_activated">已激活</string>
     <string name="status_not_activated">未激活</string>
@@ -185,4 +185,27 @@
     <string name="visible">显示</string>
     <string name="size">尺寸</string>
     <string name="visibility">可见性</string>
+
+    <!-- 规则备份 / 恢复 -->
+    <string name="rules_backup_export">备份规则</string>
+    <string name="rules_backup_import">恢复规则</string>
+    <string name="rules_backup_export_done">已备份 %1$d 个应用、%2$d 条规则</string>
+    <string name="rules_backup_export_failed">备份失败</string>
+    <string name="rules_backup_export_empty">还没有可备份的规则</string>
+    <string name="rules_backup_import_title">恢复备份</string>
+    <string name="rules_backup_import_summary">共 %1$d 个应用：新增 %2$d 条，覆盖 %3$d 条</string>
+    <string name="rules_backup_import_invalid_entries">其中 %1$d 条无效记录将被跳过</string>
+    <string name="rules_backup_import_uninstalled">有 %1$d 个应用未安装，规则会先保存，安装后首次启动自动生效</string>
+    <string name="rules_backup_import_apply">恢复</string>
+    <string name="rules_backup_import_done">已恢复 %1$d 个应用、%2$d 条规则；如有控件被误隐藏，可用「撤销上次恢复」还原</string>
+    <string name="rules_backup_beta_notice">提示：备份 / 恢复目前是半成品功能（仍在完善）。跨设备或界面差异较大时，个别规则可能不生效或定位到相近控件；若发现有控件被误隐藏，请在规则页点「撤销上次恢复」。</string>
+    <string name="rules_backup_import_failed">恢复失败</string>
+    <string name="rules_backup_import_invalid">这不是有效的 GodViewer 备份文件</string>
+    <string name="rules_backup_import_empty">这份备份没有可恢复的内容</string>
+    <string name="rules_backup_import_unlocatable">有 %1$d 条规则既无资源名也无文字，本机无法可靠定位，恢复后不会生效</string>
+    <string name="rules_backup_undo">撤销上次恢复</string>
+    <string name="rules_backup_undo_title">撤销上次恢复？</string>
+    <string name="rules_backup_undo_message">将移除上次恢复导入的全部规则，本机自己创建的规则不受影响。</string>
+    <string name="rules_backup_undo_done">已移除 %1$d 条导入的规则</string>
+    <string name="rules_backup_undo_none">没有可撤销的导入</string>
 </resources>

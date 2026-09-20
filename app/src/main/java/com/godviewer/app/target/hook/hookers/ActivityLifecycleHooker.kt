@@ -10,6 +10,7 @@ import com.godviewer.app.target.hook.GvHook
 import com.godviewer.app.target.hook.GvMethodHook
 import com.godviewer.app.target.hook.IHooker
 import com.godviewer.app.target.hook.MethodHookParam
+import com.godviewer.app.target.mirror.ThumbnailSync
 import com.godviewer.app.target.rule.ViewRuleManager
 import com.godviewer.app.target.rule.findViewBestMatch
 import java.util.Collections
@@ -41,6 +42,45 @@ class ActivityLifecycleHooker : IHooker {
         fun resumedActivity(): Activity? = resumedActivity
 
         fun liveActivities(): Set<Activity> = liveActivities
+
+        /**
+         * 对指定 Activity 重放规则（导入规则后立刻生效用）。
+         * 未 resumed 或该 Activity 无规则时安全返回。
+         */
+        fun replayCurrent(activity: Activity?) {
+            if (activity == null) return
+            runCatching { replay(activity, captureThumbs = true) }
+                .onFailure { GvLog.e(TAG, "manual replay failed", it) }
+        }
+
+        private fun replay(activity: Activity, captureThumbs: Boolean = true) {
+            val activityClass = runCatching { activity.componentName?.className }.getOrNull()
+                ?: return
+            val rules = runCatching { ViewRuleManager.rulesForActivity(activityClass) }
+                .getOrDefault(emptyList())
+            if (rules.isEmpty()) return
+            for (rule in rules) {
+                runCatching {
+                    val view = findViewBestMatch(activity, rule) ?: return@runCatching
+                    // 必须在应用规则**之前**抓图：隐藏类规则应用后视图变 GONE，
+                    // 再抓就永远抓不到（ViewSnapshot 对 GONE 直接返回 null），
+                    // 备份导入的规则本就没有任何存货，会永久显示占位图标
+                    if (captureThumbs) {
+                        // 仅 Activity 恢复时补抓一次缩略图（已有则跳过）；布局过程中跳过，
+                        // 避免地图类等高频重布局场景每帧重抓导致掉帧。
+                        ViewRuleManager.captureThumbnail(view, rule)
+                    }
+                    ViewRuleManager.applyRuleToView(view, rule)
+                }.onFailure {
+                    GvLog.e(TAG, "apply rule failed key=${rule.key()}", it)
+                }
+            }
+            if (captureThumbs) {
+                // 补抓到的新缩略图回推本体镜像（内部限频，best-effort）
+                runCatching { ThumbnailSync.flushNewThumbnails(activity.application) }
+                    .onFailure { GvLog.w(TAG, "flush new thumbnails failed", it) }
+            }
+        }
     }
 
     override fun onHook() {
@@ -114,24 +154,4 @@ class ActivityLifecycleHooker : IHooker {
         }
     }
 
-    private fun replay(activity: Activity, captureThumbs: Boolean = true) {
-        val activityClass = runCatching { activity.componentName?.className }.getOrNull()
-            ?: return
-        val rules = runCatching { ViewRuleManager.rulesForActivity(activityClass) }
-            .getOrDefault(emptyList())
-        if (rules.isEmpty()) return
-        for (rule in rules) {
-            runCatching {
-                val view = findViewBestMatch(activity, rule) ?: return@runCatching
-                ViewRuleManager.applyRuleToView(view, rule)
-                if (captureThumbs) {
-                    // 仅 Activity 恢复时补抓一次缩略图（已有则跳过）；布局过程中跳过，
-                    // 避免地图类等高频重布局场景每帧重抓导致掉帧。
-                    ViewRuleManager.captureThumbnail(view, rule)
-                }
-            }.onFailure {
-                GvLog.e(TAG, "apply rule failed key=${rule.key()}", it)
-            }
-        }
-    }
 }

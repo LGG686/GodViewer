@@ -14,6 +14,12 @@ import com.google.gson.annotations.SerializedName
  */
 object RuleMirrorProtocol {
     const val ACTION_MIRROR_RULES = "${BuildConfig.PACKAGE_NAME}.ACTION_MIRROR_RULES"
+    /**
+     * 只带缩略图的独立批次：规则批次不再夹带 base64 大图，
+     * 缩略图改由本 action 分批推送（[THUMB_MODE_MERGE]），
+     * 删除规则时用它推一次全量 key 列表做替换（[THUMB_MODE_REPLACE]）。
+     */
+    const val ACTION_MIRROR_THUMBS = "${BuildConfig.PACKAGE_NAME}.ACTION_MIRROR_THUMBS"
     const val EXTRA_PACKAGE = "package_name"
     const val EXTRA_JSON = "json"
     /** Lightweight shared token; not a secret, just blocks casual junk writes. */
@@ -32,6 +38,13 @@ object RuleMirrorProtocol {
     const val MAX_JSON_BYTES = 700 * 1024
     const val MAX_THUMB_BYTES_TOTAL = 400 * 1024
     const val MAX_SINGLE_THUMB_BYTES = 80 * 1024
+    /** 单个缩略图批次的上限（留足 Binder 余量，低于 [MAX_JSON_BYTES]）。 */
+    const val MAX_THUMB_BATCH_BYTES = 300 * 1024
+
+    /** 缩略图批次语义：只写 / 覆盖，不清删已有文件。 */
+    const val THUMB_MODE_MERGE = "merge"
+    /** 缩略图批次语义：清删不在本批 key 集合内的旧文件（值留空 = 只声明保留）。 */
+    const val THUMB_MODE_REPLACE = "replace"
 }
 
 /**
@@ -45,6 +58,11 @@ data class MirrorFile(
     @SerializedName("updated_at") val updatedAt: Long = 0L,
     @SerializedName("app_icon_png_base64") val appIconPngBase64: String? = null,
     @SerializedName("thumbnails") val thumbnails: Map<String, String>? = null,
+    /**
+     * [MirrorFile.thumbnails] 的写入语义，见 [RuleMirrorProtocol.THUMB_MODE_MERGE] /
+     * [RuleMirrorProtocol.THUMB_MODE_REPLACE]；null 时按 merge 处理。
+     */
+    @SerializedName("thumbnails_mode") val thumbnailsMode: String? = null,
     @SerializedName("rules") val rules: List<ViewRule>? = emptyList(),
 )
 

@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
 import com.godviewer.app.R
+import com.godviewer.app.host.backup.RuleBackupDelivery
 import com.godviewer.app.host.control.HostControlNotifier
 import com.godviewer.app.host.diag.HostCrashStore
 import com.godviewer.app.host.diag.HostDiagStore
@@ -104,6 +105,9 @@ open class HostControlReceiverImpl : BroadcastReceiver() {
                 val label = intent.getStringExtra(HostControlBridge.EXTRA_LABEL).orEmpty()
                 val editEnabled = intent.getBooleanExtra(HostControlBridge.EXTRA_EDIT_ENABLED, false)
                 HostControlBridge.saveTargetState(app, pkg, label, editEnabled)
+                // 该目标有未下发的备份导入：目标起来了，补发一次（重复导入幂等）
+                runCatching { RuleBackupDelivery.flush(app, pkg) }
+                    .onFailure { GvLog.w(TAG, "flush pending import failed", it) }
                 // 把当前入口模式推回目标，避免目标进程读不到 prefs 仍发自己的通知
                 EntryMode.pushToTarget(app, pkg)
                 // 仅本体入口展示控制通知；目标入口下 refresh 内部会 cancel

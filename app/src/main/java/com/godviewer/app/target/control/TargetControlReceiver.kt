@@ -8,14 +8,19 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import com.godviewer.app.shared.GvLog
+import com.godviewer.app.shared.backup.ThumbPayload
 import com.godviewer.app.shared.control.HostControlBridge
 import com.godviewer.app.shared.entry.EntryMode
+import com.godviewer.app.shared.model.ViewRule
 import com.godviewer.app.target.edit.EditMode
 import com.godviewer.app.target.edit.EditModeNotification
 import com.godviewer.app.target.hook.hookers.ActivityLifecycleHooker
 import com.godviewer.app.target.rule.ViewRuleManager
+import com.godviewer.app.target.rule.ViewRuleThumbnails
 import com.godviewer.app.target.ui.RuleManagerDialog
+import com.google.gson.Gson
 
 /**
  * Target-process receiver:
@@ -71,6 +76,70 @@ object TargetControlReceiver {
                                 .onFailure { GvLog.e(TAG, "show rule manager failed", it) }
                         }
                     }
+                    HostControlBridge.ACTION_IMPORT_RULES -> {
+                        val json = intent.getStringExtra(HostControlBridge.EXTRA_RULES_JSON)
+                        if (json.isNullOrBlank()) return
+                        val incoming = runCatching {
+                            Gson().fromJson(json, Array<ViewRule>::class.java)?.toList()
+                        }.getOrNull()
+                        if (incoming.isNullOrEmpty()) {
+                            GvLog.w(TAG, "import rules: empty payload")
+                            return
+                        }
+                        val batchId = intent.getStringExtra(HostControlBridge.EXTRA_BATCH_ID)
+                        val (added, replaced) = ViewRuleManager.importRules(incoming, batchId)
+                        GvLog.i(TAG, "import rules applied added=$added replaced=$replaced")
+                        // 立刻回放当前页面，不用等下一个 Activity
+                        Handler(Looper.getMainLooper()).post {
+                            runCatching {
+                                ActivityLifecycleHooker.replayCurrent(
+                                    ActivityLifecycleHooker.resumedActivity(),
+                                )
+                            }.onFailure {
+                                GvLog.e(TAG, "replay after import failed", it)
+                            }
+                        }
+                    }
+                    HostControlBridge.ACTION_IMPORT_THUMBS -> {
+                        val json = intent.getStringExtra(HostControlBridge.EXTRA_THUMBS_JSON)
+                        if (json.isNullOrBlank()) return
+                        val raw = runCatching {
+                            Gson().fromJson(json, Array<ThumbPayload>::class.java)
+                        }.getOrNull()
+                        if (raw.isNullOrEmpty()) {
+                            GvLog.w(TAG, "import thumbs: empty payload")
+                            return
+                        }
+                        val map = LinkedHashMap<String, ByteArray>()
+                        for (item in raw) {
+                            val key = item.key
+                            val b64 = item.data
+                            if (key.isNullOrBlank() || b64.isNullOrEmpty()) continue
+                            val bytes = runCatching { Base64.decode(b64, Base64.DEFAULT) }
+                                .getOrNull()
+                            if (bytes != null && bytes.isNotEmpty()) map[key] = bytes
+                        }
+                        val written = ViewRuleThumbnails.importThumbs(map)
+                        GvLog.i(TAG, "import thumbs written=$written of ${map.size}")
+                    }
+                    HostControlBridge.ACTION_UNDO_IMPORT -> {
+                        val batchId = intent.getStringExtra(HostControlBridge.EXTRA_BATCH_ID)
+                        if (batchId.isNullOrBlank()) return
+                        val live = ActivityLifecycleHooker.liveActivities()
+                        Handler(Looper.getMainLooper()).post {
+                            runCatching {
+                                val removed = ViewRuleManager.undoImport(batchId, live)
+                                GvLog.i(TAG, "undo import batch=$batchId removed=$removed")
+                                if (removed > 0) {
+                                    ActivityLifecycleHooker.replayCurrent(
+                                        ActivityLifecycleHooker.resumedActivity(),
+                                    )
+                                }
+                            }.onFailure {
+                                GvLog.e(TAG, "undo import failed", it)
+                            }
+                        }
+                    }
                     EntryMode.ACTION_ENTRY_MODE_CHANGED -> {
                         val appCtx = appRef ?: context.applicationContext as? Application
                         if (appCtx == null) return
@@ -100,6 +169,9 @@ object TargetControlReceiver {
             addAction(HostControlBridge.ACTION_DISABLE_EDIT)
             addAction(HostControlBridge.ACTION_UNDO)
             addAction(HostControlBridge.ACTION_MANAGE_RULES)
+            addAction(HostControlBridge.ACTION_IMPORT_RULES)
+            addAction(HostControlBridge.ACTION_IMPORT_THUMBS)
+            addAction(HostControlBridge.ACTION_UNDO_IMPORT)
             addAction(EntryMode.ACTION_ENTRY_MODE_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

@@ -48,7 +48,20 @@ data class ViewRule(
     @SerializedName("changed_image")
     var changedImage: Boolean = false,
     @SerializedName("timestamp")
-    var timestamp: Long = 0L
+    var timestamp: Long = 0L,
+    /**
+     * 是否来自备份导入。
+     *
+     * 外来规则在本机**不信任 depth 位置**（同一版本的应用在不同手机上布局可能不同：
+     * 渠道包 / AB 实验 / 账号状态 / 屏幕档位都会让兄弟节点的 childIndex 整体前移，
+     * depth 就会串位指向另一个控件），只按身份锚点（资源名 / 文字）匹配。
+     * 用户在本机重新编辑保存后自动解除（视为已确认目标控件）。
+     */
+    @SerializedName("imported")
+    var imported: Boolean = false,
+    /** 导入批次 id：同一批导入共用，支持「撤销本次导入」整批移除。 */
+    @SerializedName("batch_id")
+    var batchId: String? = null,
 ) {
     /** 视图唯一键：同一 Activity 内 depth 路径 + 视图类名 */
     data class RuleKey(val activityClass: String, val depth: List<Int>, val viewClass: String)

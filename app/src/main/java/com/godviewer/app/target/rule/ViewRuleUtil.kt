@@ -124,15 +124,26 @@ fun resolveResourceId(view: View, resourceName: String): Int {
 /**
  * 在 Activity 中按规则定位视图。
  *
- * 匹配顺序：depth 路径（严格模式下同时校验资源名，避免应用升级后误匹配）
- * → resourceName → text。每个候选都校验 viewClass。
+ * 匹配顺序：depth 路径 → resourceName → text。每个候选都校验 viewClass。
+ *
+ * depth 是**位置**，最不可靠：只要布局里少一个控件，后面所有兄弟节点的
+ * childIndex 会整体前移，depth 就指向另一个控件。因此：
+ * - 本机创建 + 版本未变（strict）：位置可信，直接命中
+ * - 版本已变：位置可疑，额外要求资源名对得上
+ * - 外来规则（[ViewRule.imported]，来自备份导入）：位置一律不可信，
+ *   必须有资源名且对得上才能用 depth 命中；否则交给下面的身份兜底
  */
 fun findViewBestMatch(activity: Activity, rule: ViewRule): View? {
-    val strict = versionCode(activity) == rule.matchVersionCode
+    val strict = !rule.imported && versionCode(activity) == rule.matchVersionCode
     // 1) depth 优先
     findViewByDepth(activity, rule.depth)?.let { view ->
         if (view.javaClass.name == rule.viewClass) {
-            if (strict || rule.resourceName.isNullOrEmpty() || resourceNameOf(view) == rule.resourceName) {
+            if (strict) return view
+            val expected = rule.resourceName
+            if (!expected.isNullOrEmpty()) {
+                if (resourceNameOf(view) == expected) return view
+            } else if (!rule.imported) {
+                // 本机规则且没有资源名可比对时，只能信位置
                 return view
             }
         }

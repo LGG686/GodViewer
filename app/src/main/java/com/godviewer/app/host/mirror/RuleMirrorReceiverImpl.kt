@@ -14,9 +14,6 @@ open class RuleMirrorReceiverImpl : BroadcastReceiver() {
         if (context == null || intent == null) {
             return
         }
-        if (intent.action != RuleMirror.ACTION_MIRROR_RULES) {
-            return
-        }
         val token = intent.getStringExtra(RuleMirror.EXTRA_TOKEN)
         if (token != RuleMirror.MIRROR_TOKEN) {
             Log.w(TAG, "reject mirror: bad token")
@@ -28,8 +25,20 @@ open class RuleMirrorReceiverImpl : BroadcastReceiver() {
             Log.w(TAG, "reject mirror: missing extras")
             return
         }
-        val ok = RuleMirror.writeMirror(context.applicationContext, packageName, json)
-        Log.d(TAG, "mirror receive pkg=$packageName ok=$ok")
+        val app = context.applicationContext
+        when (intent.action) {
+            RuleMirror.ACTION_MIRROR_RULES -> {
+                val ok = RuleMirror.writeMirror(app, packageName, json)
+                Log.d(TAG, "mirror receive pkg=$packageName ok=$ok")
+            }
+
+            RuleMirror.ACTION_MIRROR_THUMBS -> {
+                val ok = RuleMirror.writeThumbBatch(app, packageName, json)
+                Log.d(TAG, "thumb batch receive pkg=$packageName ok=$ok")
+            }
+
+            else -> Unit
+        }
     }
 
     companion object {

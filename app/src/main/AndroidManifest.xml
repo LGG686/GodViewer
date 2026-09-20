@@ -98,6 +98,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="com.godviewer.app.ACTION_MIRROR_RULES" />
+                <action android:name="com.godviewer.app.ACTION_MIRROR_THUMBS" />
             </intent-filter>
         </receiver>
 
