@@ -45,6 +45,10 @@
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- Long-pressing the Quick Settings tile opens the settings page -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
         </activity>
 
         <activity-alias
@@ -111,6 +115,29 @@
                 <action android:name="com.godviewer.app.action.HOST_MANAGE_RULES" />
             </intent-filter>
         </receiver>
+
+        <!--
+          Quick Settings tile: toggles the edit-mode entry (notification + edit mode).
+          Only bound on API 24+; older devices simply never show the tile.
+        -->
+        <service
+            android:name=".host.tile.EntryModeTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_qs_entry"
+            android:label="@string/qs_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <!--
+              Plain 1x1 two-state tile: icon + label only, no custom / large layout.
+              The toggleable hint (API 33+) lets the system treat it as a switch;
+              older versions ignore it.
+            -->
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
 
         <!-- 目标进程读取入口模式等宿主设置（只读） -->
         <provider

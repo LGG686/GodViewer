@@ -146,18 +146,11 @@ open class HostControlReceiverImpl : BroadcastReceiver() {
             }
 
             HostControlNotifier.ACTION_HIDE -> {
-                // 与目标通知的「隐藏」一致：入口改为不显示通知，并退出目标编辑模式
-                val target = HostControlBridge.currentTarget(app)
-                GvLog.i(TAG, "hide click pkg=${target?.packageName}")
-                if (target != null && target.editEnabled) {
-                    val ok = HostControlBridge.dispatchToTarget(
-                        app,
-                        HostControlBridge.ACTION_DISABLE_EDIT,
-                    )
-                    GvLog.i(TAG, "hide click: disable edit dispatch ok=$ok")
-                }
-                EntryControlUi.setEntryMode(app, EntryMode.NONE)
-                HostControlNotifier.cancel(app)
+                // 与目标通知的「隐藏」一致：入口改为不显示通知，并退出目标编辑模式。
+                // hideEntry 内部先改模式（全局广播 → 所有活着的目标退出编辑 + 撤通知），
+                // 再补一条显式指令给最近目标兜底；无条件派发，重复执行是幂等的。
+                GvLog.i(TAG, "hide click pkg=${HostControlBridge.currentTarget(app)?.packageName}")
+                EntryControlUi.hideEntry(app)
                 Toast.makeText(app, R.string.edit_mode_hidden_toast, Toast.LENGTH_LONG).show()
             }
 

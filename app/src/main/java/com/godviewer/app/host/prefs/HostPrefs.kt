@@ -68,4 +68,12 @@ object HostPrefs {
 
     /** 默认目标应用通知入口；委托 [EntryMode] 保持单一数据源 */
     fun getEntryMode(context: Context): String = EntryMode.current(context)
+
+    /** 默认 true：磁贴切到「开」时同时进入目标应用的编辑模式 */
+    fun isTileEnterEdit(context: Context): Boolean =
+        prefs(context).getBoolean(HostPrefsNames.KEY_TILE_ENTER_EDIT, true)
+
+    fun setTileEnterEdit(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(HostPrefsNames.KEY_TILE_ENTER_EDIT, enabled).apply()
+    }
 }

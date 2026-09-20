@@ -78,6 +78,15 @@ object TargetControlReceiver {
                         val mode = intent.getStringExtra(EntryMode.EXTRA_MODE)
                         EntryMode.applyFromHost(appCtx, mode)
                         GvLog.d(TAG, "entry mode synced mode=$mode")
+                        // 入口切到「不显示通知」：通知一撤就再没有退出入口了，
+                        // 必须一并退出编辑模式，否则触摸拦截会一直吃掉目标 App 的点击。
+                        // setEnabled(false) 内部会刷新通知，下面那次 refresh 只是兜底。
+                        if (mode == EntryMode.NONE && EditMode.isEnabled()) {
+                            GvLog.i(TAG, "entry hidden: exit edit mode")
+                            Handler(Looper.getMainLooper()).post {
+                                runCatching { EditMode.setEnabled(false) }
+                            }
+                        }
                         Handler(Looper.getMainLooper()).post {
                             runCatching { EditModeNotification.refresh(appCtx) }
                         }

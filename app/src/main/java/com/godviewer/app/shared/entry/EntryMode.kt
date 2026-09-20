@@ -69,18 +69,31 @@ object EntryMode {
     fun isTargetEntry(context: Context): Boolean = !isHostEntry(context)
 
     /**
-     * 持久化并推送给最近目标。不刷新宿主通知 UI——调用方（设置页）需再调 EntryControlUi。
+     * 持久化并推送给目标进程。不刷新宿主通知 UI——调用方（设置页）需再调 EntryControlUi。
+     *
+     * 广播不带包名（全局）：只投「最近一个目标」时，其它已注入进程的内存缓存不会更新，
+     * 而它们在 NONE 下不会主动回查宿主（[syncFromHostBeforePost] 只在 target 时查询），
+     * 于是通知要么撤不掉、要么恢复后发不出来。改成全局后，所有活着的目标进程都会同步。
      */
     fun set(context: Context, mode: String) {
         val normalized = normalize(mode)
-        // commit：目标进程尽快读到最新值
-        hostPrefs(context).edit().putString(HostPrefsNames.KEY_ENTRY_MODE, normalized).commit()
-        val lastTarget = HostControlBridge.currentTarget(context)?.packageName
-        if (!lastTarget.isNullOrBlank()) {
-            broadcastChanged(context, normalized, targetPackage = lastTarget)
-        } else {
-            broadcastChanged(context, normalized, targetPackage = null)
+        // 记住最后一个可见入口，磁贴「开」时按它恢复（NONE 本身不覆盖记录）
+        val edit = hostPrefs(context).edit()
+        if (normalized != NONE) {
+            edit.putString(HostPrefsNames.KEY_ENTRY_MODE_LAST_VISIBLE, normalized)
         }
+        // commit：目标进程尽快读到最新值
+        edit.putString(HostPrefsNames.KEY_ENTRY_MODE, normalized).commit()
+        broadcastChanged(context, normalized, targetPackage = null)
+    }
+
+    /**
+     * 磁贴「开」时要恢复的入口：最后一个可见模式，从未设置过则 [TARGET]。
+     */
+    fun lastVisible(context: Context): String {
+        val mode = hostPrefs(context)
+            .getString(HostPrefsNames.KEY_ENTRY_MODE_LAST_VISIBLE, TARGET) ?: TARGET
+        return normalize(mode)
     }
 
     fun labelRes(mode: String): Int = when (mode) {

@@ -49,7 +49,10 @@ class MainActivity : HostActivity() {
         EntryControlUi.refresh(this)
         setupTabs()
 
-        val openSettings = intent?.getBooleanExtra(SettingsFragment.EXTRA_OPEN_SETTINGS, false) == true
+        // 长按快捷设置磁贴会带 QS_TILE_PREFERENCES 打开这里，直接落到设置页
+        val fromTilePrefs = intent?.action == ACTION_QS_TILE_PREFERENCES
+        val openSettings = fromTilePrefs ||
+            intent?.getBooleanExtra(SettingsFragment.EXTRA_OPEN_SETTINGS, false) == true
         selectedTabId = when {
             openSettings -> R.id.nav_settings
             savedInstanceState != null -> savedInstanceState.getInt(STATE_TAB, R.id.nav_home)
@@ -177,6 +180,9 @@ class MainActivity : HostActivity() {
     }
 
     companion object {
+        /** 字面常量，不引用 TileService 类（该类在 API 24 以下不存在） */
+        private const val ACTION_QS_TILE_PREFERENCES =
+            "android.service.quicksettings.action.QS_TILE_PREFERENCES"
         private const val STATE_TAB = "main_selected_tab"
         private const val TAB_HOME = "tab_home"
         private const val TAB_GUIDE = "tab_guide"

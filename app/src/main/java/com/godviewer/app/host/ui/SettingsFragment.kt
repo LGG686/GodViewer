@@ -1,8 +1,11 @@
 package com.godviewer.app.host.ui
 
 import android.Manifest
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -10,6 +13,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -20,6 +24,7 @@ import com.godviewer.app.host.MainActivity
 import com.godviewer.app.host.UpdateChecker
 import com.godviewer.app.host.diag.HostDiag
 import com.godviewer.app.host.prefs.HostPrefs
+import com.godviewer.app.host.tile.EntryModeTileService
 import com.godviewer.app.shared.AppLanguage
 import com.godviewer.app.host.entry.EntryControlUi
 import com.godviewer.app.shared.entry.EntryMode
@@ -69,6 +74,19 @@ class SettingsFragment : Fragment() {
 
         refreshEntryModeValue()
         binding.entryModeRow.setOnClickListener { showEntryModePicker() }
+
+        binding.tileRow.setOnClickListener { requestAddTile() }
+        binding.tileEnterEditSwitch.setOnCheckedChangeListener(null)
+        binding.tileEnterEditSwitch.isChecked = HostPrefs.isTileEnterEdit(ctx)
+        binding.tileEnterEditSwitch.setOnCheckedChangeListener { _, checked ->
+            HostPrefs.setTileEnterEdit(ctx, checked)
+            val msg = if (checked) {
+                R.string.settings_tile_enter_edit_on
+            } else {
+                R.string.settings_tile_enter_edit_off
+            }
+            Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+        }
 
         suppressHideIconCallback = true
         binding.hideIconSwitch.isChecked = LauncherIconHelper.isHidden(ctx)
@@ -200,7 +218,8 @@ class SettingsFragment : Fragment() {
                     EntryMode.HOST -> maybeRequestNotificationThenHostEntry()
 
                     EntryMode.NONE -> {
-                        EntryControlUi.setEntryMode(ctx, EntryMode.NONE)
+                        // 隐藏入口：顺带让所有目标退出编辑模式，通知一撤就没别的退出入口了
+                        EntryControlUi.hideEntry(ctx)
                         refreshEntryModeValue()
                         Toast.makeText(
                             ctx,
@@ -222,6 +241,38 @@ class SettingsFragment : Fragment() {
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    /**
+     * 把磁贴加到快捷设置面板。系统弹确认条（API 33+），低版本只能让用户自己去编辑栏拖。
+     */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun requestAddTile() {
+        val ctx = requireContext()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(ctx, R.string.settings_tile_add_unsupported, Toast.LENGTH_LONG).show()
+            return
+        }
+        val statusBar = ctx.getSystemService(StatusBarManager::class.java)
+        val icon = Icon.createWithResource(ctx, R.drawable.ic_qs_entry)
+        statusBar.requestAddTileService(
+            ComponentName(ctx, EntryModeTileService::class.java),
+            getString(R.string.qs_tile_label),
+            icon,
+            ContextCompat.getMainExecutor(ctx),
+        ) { result ->
+            val msg = when (result) {
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> R.string.settings_tile_add_added
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                    R.string.settings_tile_add_already
+
+                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED ->
+                    R.string.settings_tile_add_dismissed
+
+                else -> R.string.settings_tile_add_requested
+            }
+            Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun maybeRequestNotificationThenHostEntry() {

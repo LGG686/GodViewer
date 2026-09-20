@@ -18,8 +18,12 @@ User preference: communicate in **中文** unless they write in English.
 - Requirements: **JDK 17**, Android SDK **platform 35**. `local.properties` (`sdk.dir`) is
   gitignored and must exist locally (this machine often uses `tools-Android/`).
 - Stack: Gradle 8.7 wrapper, AGP 8.5.2, Kotlin 1.9.24 (jvmTarget 1.8), minSdk 23 / targetSdk 35.
-- UI is **Views + XML + ViewBinding** (`viewBinding = true`), **not Compose**. No flavors, no CI,
-  no DI framework, no coroutines, no Room.
+- UI is **Views + XML + ViewBinding** (`viewBinding = true`), **not Compose**. No flavors, no DI
+  framework, no coroutines, no Room.
+- CI (`.github/workflows/android-build.yml`): builds the **release variant only** (no debug — it is
+  never published), on pushes to `main` and `feature/**` plus manual dispatch. Pushing to `main`
+  publishes a GitHub Release with the release APK; `feature/**` and manual runs only upload the
+  artifact unless the `publish` input is ticked.
 - No real unit/instrumented tests; verify on device with LSPosed + logcat (`GvLog` / `GodViewer.*`).
 
 ## Architecture (single `:app` module)
@@ -125,6 +129,25 @@ Backup before large moves: desktop `GodViewer-backup-pre-optimize-*` +
   The 600 ms `scheduleConfirmFallback` in `EditModeNotification` must use
   `shouldShowTargetNotification()` — using `isHostEntryInTarget()` makes a hidden notification
   reappear on cold start.
+- Quick Settings tile (`host/tile/EntryModeTileService`, API 24+): a one-tap switch for the entry,
+  labelled "God mode" (`qs_tile_label`). It stays a plain 1x1 tile — icon + label (plus a
+  subtitle on API 29+) and no custom / large-tile layout, because large tiles are unreliable on
+  many OEM builds; nothing in the app lets the user pick a tile size. Tile size cannot be pinned
+  from the app (no size API), so Settings offers one-tap adding via
+  `StatusBarManager.requestAddTileService` (API 33+) and a manual hint below that.
+  Off → `EntryControlUi.hideEntry()` = `EntryMode.set(NONE)` **first**, then a best-effort
+  `HostControlBridge.ACTION_DISABLE_EDIT` to the last target (idempotent). On →
+  `EntryControlUi.restoreEntry()`: dispatch `ACTION_ENABLE_EDIT` **before** restoring
+  `EntryMode.lastVisible()`, otherwise the target posts a "tap to enable" notification first and
+  the text flickers; the host entry falls back to the target entry when
+  `areNotificationsEnabled()` is false, because a tile cannot show the permission dialog.
+  `EntryMode.set()` broadcasts **without a package** on purpose — only the last target would
+  otherwise be updated, and targets sitting on `NONE` never re-query the host
+  (`syncFromHostBeforePost` only runs for `TARGET`), so their notification would never come back.
+  The target side exits edit mode whenever `ACTION_ENTRY_MODE_CHANGED` carries `mode == NONE`.
+  `entry_mode_last_visible` keeps the last non-`NONE` mode for the tile. Turning the tile on
+  enters edit mode in the last target unless the Settings switch
+  (`settings_tile_enter_edit_*`) is turned off.
 - Do **not** restore deleted AppList* UI (`AppListActivity` / adapters / layouts).
 - Keep load-bearing misspellings: `PupupWindowHooker.kt`, `VeiwUtil.kt`.
 - Logging: prefer `GvLog` (`GodViewer.<tag>`, forwarded to the framework log via the sink
