@@ -61,6 +61,10 @@ android {
             signingConfig signingConfigs.debug
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             buildConfigField("String", "PACKAGE_NAME", "\"com.godviewer.app\"")
+            // AGP 8 不再自动生成这两个字段，而 SettingsFragment / UpdateChecker /
+            // GodViewerModule 等都会读，release 变体必须显式提供
+            buildConfigField("int", "VERSION_CODE", String.valueOf(RELEASE_VERSION_CODE))
+            buildConfigField("String", "VERSION_NAME", "\"${RELEASE_VERSION_NAME}\"")
         }
         debug {
             minifyEnabled false
