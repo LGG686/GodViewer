@@ -4,6 +4,33 @@ plugins {
     id "org.jetbrains.kotlin.kapt"
 }
 
+// ---------- release 签名 ----------
+// 血泪史：4.3.3~4.3.6 的 release 一律用 signingConfigs.debug，而 GitHub Actions 每
+// 次都是全新 runner，AGP 发现没有 ~/.android/debug.keystore 就现场新造一把——于是四个
+// 版本四个签名，用户每次升级都必须先卸载，规则数据跟着一起没。
+// 现在统一使用一把固定密钥，来源优先级：
+//   1. 环境变量（CI：由 Actions Secrets 注入）
+//   2. local.properties（本机：signing.storeFile / storePassword / keyAlias / keyPassword）
+// 私钥绝不进仓库：*.jks 已在 .gitignore 里，CI 侧走 Secrets，本机侧需要你自己保管好
+// godviewer-release.jks。拿不到时不可能凭空签出一致的包，显式回落 debug 并告警，
+// 而不是静默产出一个又一次卸不掉的 APK。
+def signingProps = new Properties()
+def localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.withInputStream { signingProps.load(it) }
+}
+def pickSigningValue = { String envName, String propName ->
+    def value = System.getenv(envName)
+    (value != null && value.trim().length() > 0) ? value : signingProps.getProperty(propName)
+}
+def signingStorePath = pickSigningValue("GODVIEWER_KEYSTORE", "signing.storeFile")
+def signingStorePassword = pickSigningValue("GODVIEWER_KEYSTORE_PASSWORD", "signing.storePassword")
+def signingKeyAlias = pickSigningValue("GODVIEWER_KEY_ALIAS", "signing.keyAlias")
+def signingKeyPassword = pickSigningValue("GODVIEWER_KEY_PASSWORD", "signing.keyPassword")
+def signingStoreFileRef = (signingStorePath != null) ? file(signingStorePath) : file("${projectDir}/godviewer-release.jks")
+def canSignRelease = signingStoreFileRef.exists() &&
+        signingStorePassword != null && signingKeyAlias != null && signingKeyPassword != null
+
 // ---------- 版本 ----------
 // release：固定下面两个常量（发版时手动改）
 // debug：每次 assemble/install/bundle Debug 自动 +1，APK 与 BuildConfig 均为纯数字
@@ -53,13 +80,30 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            if (canSignRelease) {
+                storeFile signingStoreFileRef
+                storePassword signingStorePassword
+                keyAlias signingKeyAlias
+                keyPassword signingKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
             debuggable false
-            // 自用/测试 release：用 debug keystore 签名（上架前应换成正式 keystore）
-            signingConfig signingConfigs.debug
+            if (canSignRelease) {
+                // 固定密钥：CI 与本机构建、跨版本都签出同一把钥匙，可以直接覆盖安装
+                signingConfig signingConfigs.release
+            } else {
+                // 没配密钥时宁可构建成功也要喊出来，免得又发行一个要卸载的版本
+                signingConfig signingConfigs.debug
+                println("[GodViewer] WARN: no fixed release keystore configured -> this APK cannot be installed over a published release")
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             buildConfigField("String", "PACKAGE_NAME", "\"com.godviewer.app\"")
             // AGP 8 不再自动生成这两个字段，而 SettingsFragment / UpdateChecker /

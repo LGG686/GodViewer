@@ -23,7 +23,31 @@ User preference: communicate in **中文** unless they write in English.
 - CI (`.github/workflows/android-build.yml`): builds the **release variant only** (no debug — it is
   never published), on pushes to `main` and `feature/**` plus manual dispatch. Pushing to `main`
   publishes a GitHub Release with the release APK; `feature/**` and manual runs only upload the
-  artifact unless the `publish` input is ticked.
+  artifact unless the `publish` input is ticked. Publishing is additionally gated on the signing
+  secret being present (below), so a misconfigured run can never put another uninstall-only APK on
+  the Releases page.
+- **Release signing must stay reproducible.** `buildTypes.release` used to reuse
+  `signingConfigs.debug`; GitHub Actions starts from a clean runner every time, so AGP generated a
+  throwaway key per run and **v4.3.3..v4.3.6 shipped with four different signatures** — every
+  upgrade required uninstalling (which wipes the user's rules). Release now signs with
+  `godviewer-release.jks`, looked up from env vars (`GODVIEWER_KEYSTORE`,
+  `GODVIEWER_KEYSTORE_PASSWORD`, `GODVIEWER_KEY_ALIAS`, `GODVIEWER_KEY_PASSWORD`) or
+  `local.properties` (`signing.storeFile` / `storePassword` / `keyAlias` / `keyPassword`); CI
+  restores it from the matching Actions Secrets. **The private key is never committed** — `*.jks`
+  is gitignored. If no key is found the variant falls back to debug signing, prints a loud
+  `[GodViewer] WARN`, and the publish step refuses to run. Keep that guard.
+  Historical note: the published assets of v4.3.3..v4.3.6 were re-signed afterwards and re-uploaded
+  in place, so all four Releases now share certificate `3d38fb62…`; a device already running one of
+  the original packages still needs one manual uninstall (those per-runner keys died with their
+  runners — unavoidable, do not try to "fix" it by reshuffling old assets).
+  The four Actions Secrets (`GODVIEWER_KEYSTORE_BASE64` + password/alias/keypassword) are
+  configured, and `.github/workflows/android-build.yml` has an **Assert release signature** step
+  that compares the built APK's SHA-1 against the pinned fingerprint after every release build.
+  A mismatch fails the job before any asset reaches Releases. Note `apksigner` prints the digest
+  **without colons**, so compare against `3D38FB6237EE0E96E0C0679BD80640771F4AA5BD`.
+  Local builds: keep the keystore outside the repo and point `local.properties` at it
+  (`signing.storeFile=<abs path>/godviewer-release.jks`); that makes `assembleRelease` on a
+  workstation produce the same signature as CI, so the two install over each other.
 - No real unit/instrumented tests; verify on device with LSPosed + logcat (`GvLog` / `GodViewer.*`).
 
 ## Architecture (single `:app` module)
@@ -245,6 +269,38 @@ Backup before large moves: desktop `GodViewer-backup-pre-optimize-*` +
 - Comments mixed English (older, `@author hhvvg`) and Chinese (newer `data/` / `util/`) — match nearby.
 - Host layouts: `activity_*` / `fragment_*`. Injected dialogs: `layout_*`, inflated from `moduleRes`.
 - Leave local/agent-only trees alone unless asked: `.zcode/`, `tools-Android/`, `HANDOFF.md`, `a.py`.
+
+## Releasing (three steps, CI does the rest)
+**Never write release notes into `.github/workflows/android-build.yml`** — they live in
+`docs/changelog-<VERSION>.md`, one file per version (`docs/changelog-4.3.6.md` is the reference
+for the shape). To cut a release:
+
+1. Bump **both** constants in `app/build.gradle`: `RELEASE_VERSION_NAME` (`"4.3.7"`) and
+   `RELEASE_VERSION_CODE` (`25`, must increase monotonically — Android refuses a downgrade).
+2. Add `docs/changelog-<new version>.md` describing what actually changed in Chinese, in the same
+   commit. **The file name must match `RELEASE_VERSION_NAME` exactly.**
+3. Push to `main`. CI builds, asserts the signature, and publishes `GodViewer-<VERSION>-release.apk`
+   as a Release tagged `v<VERSION>`. There is nothing to do on the GitHub web UI.
+
+What runs when:
+
+| Trigger | Builds | Publishes to Releases |
+|---|---|---|
+| push to `main` | yes | **yes** (and re-publishes if the tag exists) |
+| push to `feature/**` | yes | no — artifact only |
+| manual "Run workflow" | yes | no, unless the `publish` input is ticked |
+
+Things that will bite you:
+
+- **The version number never auto-increments, by design.** Pushing to `main` without bumping it
+  silently re-publishes the *same* version: `gh release delete --cleanup-tag` removes the existing
+  release first, so its download counter and commit link reset. That is intended for re-cutting a
+  broken asset, not for shipping changes — always bump before you push user-facing code.
+- **A missing `docs/changelog-<VERSION>.md` fails the run before anything is published.** It used to
+  be hard-coded in the workflow, which is how the previous version's notes once shipped under a new
+  title. Only the two never-changing boilerplate lines (CI build + LSPosed scope reminder) remain
+  in the workflow; everything else comes from the changelog file.
+- Hand-written version jumps are fine (`4.3.6` → `4.4.0`) — it is a product decision, not arithmetic.
 
 ## Before changing sensitive areas
 1. `README.md` — features, persistence design/limits, Android 16 + LSPosed checklist.

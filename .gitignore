@@ -19,3 +19,6 @@ a.py
 HANDOFF.md
 # debug 本地递增计数（每次 assembleDebug 自动 +1）
 app/debug-version.properties
+*.jks
+*.keystore
+/godviewer-release.jks

@@ -47,6 +47,34 @@ jobs:
       # build.gradle. A debug build is never published, so skip it to keep the
       # run short.
       # Signed with the runner's debug keystore (see buildTypes.release in app/build.gradle).
+      # Release APKs must share one signature or Android refuses to upgrade in
+      # place and the user has to uninstall (which wipes their rules). Every CI
+      # run starts from a clean runner, so signingConfigs.debug is a *random*
+      # key -- that is exactly how 4.3.3..4.3.6 ended up with four different
+      # signatures. Restore the real keystore from Secrets instead; it never
+      # lives in the repository.
+      # NOTE: `secrets` is not available in `if:` expressions -- trying to gate a
+      # step on a secret directly makes GitHub reject the whole workflow file
+      # (no job even starts). Flush a flag into the job env instead.
+      - name: Restore release signing key
+        run: |
+          set -euo pipefail
+          KEY="${{ secrets.GODVIEWER_KEYSTORE_BASE64 }}"
+          if [ -z "$KEY" ]; then
+            echo "::warning::No GODVIEWER_KEYSTORE_BASE64 secret -> falling back to the runner's throwaway debug key. This APK will NOT install over a published release."
+            echo "HAS_RELEASE_KEY=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "$KEY" | base64 -d > "$HOME/godviewer-release.jks"
+          {
+            echo "GODVIEWER_KEYSTORE=$HOME/godviewer-release.jks"
+            echo "GODVIEWER_KEYSTORE_PASSWORD=${{ secrets.GODVIEWER_KEYSTORE_PASSWORD }}"
+            echo "GODVIEWER_KEY_ALIAS=${{ secrets.GODVIEWER_KEY_ALIAS }}"
+            echo "GODVIEWER_KEY_PASSWORD=${{ secrets.GODVIEWER_KEY_PASSWORD }}"
+            echo "HAS_RELEASE_KEY=true"
+          } >> "$GITHUB_ENV"
+          echo "Release keystore restored."
+
       - name: Build release APK
         id: build_release
         run: |
@@ -80,6 +108,62 @@ jobs:
           } > ci-report.md
           cat ci-report.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Print APK signature
+        if: steps.build_release.outcome == 'success'
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | head -1)
+          if [ -n "$APKSIGNER" ]; then
+            {
+              echo "### APK signature"
+              echo '```'
+              "$APKSIGNER" verify --print-certs "$APK" | grep -E "certificate (DN|SHA-1|SHA-256)" || echo "(no signature info)"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Last line of defence. Even with the keystore restored, refuse to let the
+      # run go green if the APK does not carry the expected certificate. This is
+      # exactly the check that would have caught the 4.3.3..4.3.6 mess on the
+      # very first run: four builds, four random signatures, four forced
+      # uninstalls. The fingerprint is public information (it ships in every
+      # release notes) so hardcoding it here leaks nothing.
+      - name: Assert release signature
+        if: steps.build_release.outcome == 'success' && env.HAS_RELEASE_KEY == 'true'
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | head -1)
+          if [ -z "$APKSIGNER" ]; then
+            APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}" \
+                             -type f -name apksigner 2>/dev/null | head -1)
+          fi
+          # apksigner prints "Signer #1 certificate SHA-1 digest: <hex>" with NO
+          # colons, so the expected value is written the same way.
+          EXPECTED="3D38FB6237EE0E96E0C0679BD80640771F4AA5BD"
+          # apksigner prints "Signer #1 certificate SHA-1 digest: <lowercase
+          # fingerprint>"; $NF is the fingerprint, compared uppercased.
+          set +e
+          RAW=$("$APKSIGNER" verify --print-certs "$APK" 2>&1)
+          FP=$(printf '%s\n' "$RAW" | grep -m1 "SHA-1" | awk '{print $NF}' | tr 'a-z' 'A-Z')
+          VERIFY_RC=$?
+          set -e
+          EXPECTED_UPPER=$(echo "$EXPECTED" | tr 'a-z' 'A-Z')
+          {
+            echo "### Release signature check"
+            echo '```'
+            echo "expected: $EXPECTED"
+            echo "actual:   $FP"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$FP" != "$EXPECTED_UPPER" ]; then
+            # The annotation is the only channel readable without log access:
+            # ::error:: messages surface through the Checks API.
+            echo "::error title=Release signature mismatch::apksigner=[$APKSIGNER] apk=[$APK] expected=[$EXPECTED_UPPER] actual=[$FP] raw=[$(printf '%s' "$RAW" | head -3 | tr '\n' '|')]"
+            exit 1
+          fi
+          echo "Signature matches the GodViewer release key."
+
       - name: Upload release APK artifact
         if: steps.build_release.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -87,6 +171,44 @@ jobs:
           name: godviewer-release-apk
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: warn
+
+      # Release notes used to be hardcoded here, which meant bumping the version
+      # in app/build.gradle silently republished the *previous* version's notes
+      # under the new title. They now live in docs/changelog-<version>.md, so the
+      # missing-file check fails the run instead. Only boilerplate that never
+      # changes stays here; this step runs on feature branches too, so a broken
+      # changelog shows up before anything reaches the Releases page.
+      - name: Prepare release notes
+        id: notes
+        if: steps.build_release.outcome == 'success'
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -m1 'RELEASE_VERSION_NAME' app/build.gradle \
+            | sed -E 's/.*"(.*)".*/\1/')
+          CODE=$(grep -m1 'RELEASE_VERSION_CODE' app/build.gradle \
+            | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          CHANGELOG="docs/changelog-$VERSION.md"
+          if [ ! -f "$CHANGELOG" ]; then
+            echo "::error title=Missing changelog::$CHANGELOG not found -- add it in the same commit that bumps RELEASE_VERSION_NAME, otherwise the release ships empty notes."
+            exit 1
+          fi
+          mkdir -p dist
+          {
+            echo "## GodViewer v$VERSION"
+            echo
+            cat "$CHANGELOG"
+            echo
+            echo "### 安装说明"
+            echo "- 本包由 CI 自动构建（R8 混淆 + 资源瘦身）"
+            echo "- 安装后在 LSPosed 中勾选目标应用作用域，并强制停止一次目标应用"
+            echo
+            echo "**构建版本**：main 分支 \`${{ github.sha }}\`（versionCode $CODE）"
+          } > dist/notes.md
+          {
+            echo "GODVIEWER_VERSION=$VERSION"
+            echo "GODVIEWER_VERSION_CODE=$CODE"
+          } >> "$GITHUB_ENV"
+          echo "tag=v$VERSION versionCode=$CODE changelog=$CHANGELOG" | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Publishes the release APK on the Releases page, in the same shape as
       # upstream (Chinese notes, release asset only). Needs "Read and write
@@ -96,16 +218,18 @@ jobs:
       # Test builds: a manual run ("Run workflow") only builds by default, so
       # work-in-progress branches never touch the Releases page. Tick the
       # "publish" input to release a manual run, or just push to main.
+      # Refuse to publish without the fixed keystore: an APK signed by the
+      # runner's throwaway debug key installs only after an uninstall, which is
+      # exactly the 4.3.3..4.3.6 mess we just cleaned up on the Releases page.
+      # A manual run can still force it via the "publish" checkbox.
       - name: Publish GitHub Release
-        if: steps.build_release.outcome == 'success' && (github.ref == 'refs/heads/main' || inputs.publish)
+        if: steps.build_release.outcome == 'success' && steps.notes.outcome == 'success' && ((github.ref == 'refs/heads/main' && env.HAS_RELEASE_KEY == 'true') || inputs.publish)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          VERSION=$(grep -m1 'RELEASE_VERSION_NAME' app/build.gradle \
-            | sed -E 's/.*"(.*)".*/\1/')
-          CODE=$(grep -m1 'RELEASE_VERSION_CODE' app/build.gradle \
-            | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          VERSION="$GODVIEWER_VERSION"
+          CODE="$GODVIEWER_VERSION_CODE"
           TAG="v$VERSION"
           echo "tag=$TAG versionCode=$CODE" | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -113,26 +237,13 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk \
             "dist/GodViewer-$VERSION-release.apk"
 
-          {
-            echo "## GodViewer v$VERSION"
-            echo
-            echo "### 新功能"
-            echo "- 新增**宿主侧规则管理**：在规则页打开任意已同步应用，就能删除规则、隐藏 / 显示它的控件、修改文字、还原原始值；列表支持多选，可批量删除"
-            echo "- 目标应用正在运行时，改动立即生效，并重新抓取缩略图，列表里直接看到改之后的样子"
-            echo "- 目标应用未运行时，改动进入待生效队列，下次打开该应用自动应用，列表底部提示还有几条在等待"
-            echo
-            echo "### 优化"
-            echo "- 被隐藏的规则保留隐藏前拍下的缩略图（隐藏后控件已不可见，无法再抓）"
-            echo "- 管理操作不会把外来规则降级为本机规则：跨设备恢复来的规则依旧按资源名 / 文字匹配，不会退回按位置匹配"
-            echo "- 修复部分机型点击通知「管理规则」无反应：回到应用后会补弹出规则管理页"
-            echo
-            echo "### 说明"
-            echo "- **规则管理目前是半成品功能，仍在完善中**：它跨进程下发指令，属于尽力而为 —— 目标应用被杀或长时间未打开时改动会一直排队；极端情况下某条指令可能被目标侧因时间戳不一致而拒绝（此时会以目标侧真相为准自动纠偏，可在目标应用内重新编辑）"
-            echo "- 本包由 CI 自动构建（R8 混淆 + 资源瘦身），签名非官方密钥，与官方安装包不能互相覆盖，需先卸载旧版"
-            echo "- 安装后在 LSPosed 中勾选目标应用作用域，并强制停止一次目标应用"
-            echo
-            echo "**构建版本**：main 分支 \`${{ github.sha }}\`（versionCode $CODE）"
-          } > dist/notes.md
+          # Never touch an existing release unless the notes for this exact
+          # version are known-good: `gh release delete` below removes it first,
+          # so anything that fails afterwards loses the published asset.
+          if [ -z "${VERSION:-}" ] || [ -z "${CODE:-}" ]; then
+            echo "::error title=Missing version::Version metadata did not carry over from the 'Prepare release notes' step -- refusing to touch the existing release."
+            exit 1
+          fi
 
           # Re-publishing the same version replaces the previous release, so a
           # push to main always refreshes the asset instead of failing on a
