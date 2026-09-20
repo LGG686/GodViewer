@@ -31,11 +31,13 @@
     <string name="settings_language_zh">中文</string>
     <string name="settings_language_en">English</string>
     <string name="settings_entry_mode_title">Edit-mode entry</string>
-    <string name="settings_entry_mode_subtitle">If the target app does not request notification permission, choose the host notification entry</string>
+<string name="settings_entry_mode_subtitle">If the target app does not request notification permission, choose the host notification entry. Once your rules are final, choose \"No notification\" to hide the entry</string>
     <string name="settings_entry_mode_target">Target app notification</string>
     <string name="settings_entry_mode_host">GodViewer host notification</string>
+    <string name="settings_entry_mode_none">No notification (rules keep working)</string>
     <string name="settings_entry_mode_target_toast">Using target app notification entry</string>
     <string name="settings_entry_mode_host_toast">Using GodViewer host notification entry</string>
+    <string name="settings_entry_mode_none_toast">Entry notification hidden. Saved rules still apply. If a target app is already running, force-stop it once; you can turn the notification back on here.</string>
     <string name="settings_entry_mode_host_need_notification">Notification permission is required for the host entry. You can grant it in system settings.</string>
     <string name="settings_hide_icon_title">Hide desktop icon</string>
     <string name="settings_hide_icon_subtitle">Remove the launcher shortcut. Reopen via the persistent notification, LSPosed module settings, or the system app list.</string>
@@ -53,6 +55,8 @@
     <string name="host_control_notification_title">GodViewer</string>
     <string name="host_control_no_target_text">No active target</string>
     <string name="host_control_target_text">%1$s · edit mode %2$s</string>
+    <string name="host_control_tap_to_disable_text">%1$s · edit mode is on — tap to disable</string>
+    <string name="host_control_tap_to_enable_text">%1$s · edit mode is off — tap to enable</string>
     <string name="host_control_no_target">No active target app. Open a scoped app first.</string>
     <string name="settings_check_update_title">Check for updates</string>
     <string name="settings_check_update_subtitle">Check GitHub for a newer release</string>
@@ -82,7 +86,7 @@
     <string name="settings_clear_diag_confirm">Clear</string>
     <string name="settings_clear_diag_done">Cleared</string>
     <string name="settings_clear_diag_failed">Clear failed</string>
-    <string name="changelog_body">GodViewer changelog\n\n4.3.3\n• Test release to verify the in-app update check; no functional changes\n\n4.3.2\n• New host-notification entry for target apps without notification permission (switchable in Settings)\n• Live highlight of the selected view\n• Batch rule editing: select all / multi-select and batch delete; view thumbnails in the rule list\n• In-app update check and copy / clear diagnostic logs\n• Rewritten touch interception fixes taps in some hooked apps; smaller click bounds for finer control\n• Rewritten dialog style with less dependence on target app code\n• New hook approach (migrated to libxposed API 102) for better stability\n• Bug fixes and support for more common apps\n\n3.3.2\n• Move edit-mode entry to GodViewer host notification (enable / undo / manage rules); targets no longer need notification permission\n• More stable edit intercept via Activity touch dispatch + force-clickable refresh\n• Clear stale target when reopening the host app\n• Isolate injected dialogs from target themes; unify palette with host UI; fix advanced editor blank content\n\n3.2.2\n• Donate page with WeChat Pay and Alipay QR codes\n• Align secondary page toolbars with primary tab titles\n\n3.2.1 — New UI version\n• Host bottom navigation: Home / Guide / Rules / Settings\n• Rule mirror list with app icons and detail pages\n• Settings: language (system/zh/en), hide desktop icon, check updates, auto-update preference, changelog, user agreement\n• Global watermark and tab fade animation\n\n2.2.1\n• Cap preview image height so edit buttons stay visible for large views\n\n2.2.0\n• Rule manager in the injected UI\n• Persist and replay view rules after app restart</string>
+    <string name="changelog_body">GodViewer changelog\n\n4.3.3\n• New “no notification” entry mode: once the rules are final, hide the edit-mode entry notification (the GodViewer host notification and the in-app one) — saved rules keep applying\n• Hide is the first notification action: it hides the entry and exits edit mode; turn the entry back on in Settings\n• Tap the notification to toggle edit mode\n• The notification text shows the current mode and what a tap will do\n\n4.3.2\n• New host-notification entry for target apps without notification permission (switchable in Settings)\n• Live highlight of the selected view\n• Batch rule editing: select all / multi-select and batch delete; view thumbnails in the rule list\n• In-app update check and copy / clear diagnostic logs\n• Rewritten touch interception fixes taps in some hooked apps; smaller click bounds for finer control\n• Rewritten dialog style with less dependence on target app code\n• New hook approach (migrated to libxposed API 102) for better stability\n• Bug fixes and support for more common apps\n\n3.3.2\n• Move edit-mode entry to GodViewer host notification (enable / undo / manage rules); targets no longer need notification permission\n• More stable edit intercept via Activity touch dispatch + force-clickable refresh\n• Clear stale target when reopening the host app\n• Isolate injected dialogs from target themes; unify palette with host UI; fix advanced editor blank content\n\n3.2.2\n• Donate page with WeChat Pay and Alipay QR codes\n• Align secondary page toolbars with primary tab titles\n\n3.2.1 — New UI version\n• Host bottom navigation: Home / Guide / Rules / Settings\n• Rule mirror list with app icons and detail pages\n• Settings: language (system/zh/en), hide desktop icon, check updates, auto-update preference, changelog, user agreement\n• Global watermark and tab fade animation\n\n2.2.1\n• Cap preview image height so edit buttons stay visible for large views\n\n2.2.0\n• Rule manager in the injected UI\n• Persist and replay view rules after app restart</string>
     <string name="user_agreement_body">User agreement\n\nGodViewer is free and open-source software licensed under the GNU General Public License v3.0 (GPL-3.0).\n\n1. This software is provided for learning, research, and personal debugging only.\n2. You are solely responsible for how you use this module, including compliance with local laws and the terms of any target applications.\n3. Do not use GodViewer to tamper with apps in ways that harm others, bypass paid features illegally, or distribute malware.\n4. The software is provided \"AS IS\", without warranty of any kind. Authors are not liable for data loss, account bans, or device issues arising from use.\n5. Prefer installing builds you compile yourself or download from the official GitHub repository. Avoid unknown APK sources.\n6. By using this software you agree to the GPL-3.0 license terms and the cautions above.\n\nFull license text: https://www.gnu.org/licenses/gpl-3.0.html\nSource: https://github.com/tobbytian/GodViewer</string>
     <string name="status_activated">Activated</string>
     <string name="status_not_activated">Not activated</string>
@@ -139,7 +143,11 @@
     <string name="edit_mode_disabled_toast">Edit mode disabled</string>
     <string name="edit_mode_on">Enabled</string>
     <string name="edit_mode_off">Disabled</string>
+    <string name="edit_mode_tap_to_enable">Edit mode is off — tap to enable</string>
+    <string name="edit_mode_tap_to_disable">Edit mode is on — tap to disable</string>
     <string name="edit_mode_enable">Enable</string>
+    <string name="edit_mode_hide">Hide</string>
+    <string name="edit_mode_hidden_toast">Notification hidden. Turn it back on in GodViewer settings.</string>
     <string name="reset">Reset Rule</string>
     <string name="undo">Undo</string>
     <string name="manage_rules">Manage Rules</string>

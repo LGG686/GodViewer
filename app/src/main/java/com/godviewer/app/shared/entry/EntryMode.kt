@@ -11,7 +11,7 @@ import com.godviewer.app.shared.HostPrefsNames
 import com.godviewer.app.shared.control.HostControlBridge
 
 /**
- * 编辑模式功能入口：目标应用通知（默认）或上帝视角本体通知。
+ * 编辑模式功能入口：目标应用通知（默认）、上帝视角本体通知，或不显示通知（[NONE]）。
  *
  * - 宿主：直接读写 [HostPrefsNames] 同名 SharedPreferences（不依赖 host 包）
  * - 目标：内存 / 本地缓存 / Provider → 默认 target
@@ -27,6 +27,12 @@ import com.godviewer.app.shared.control.HostControlBridge
 object EntryMode {
     const val TARGET = "target"
     const val HOST = "host"
+    /**
+     * 不显示入口通知：目标应用内不发布编辑模式通知。
+     * 规则回放与通知无关，隐藏后已保存的规则照常生效。
+     * 恢复途径：回到宿主设置页改回 [TARGET] 或 [HOST]。
+     */
+    const val NONE = "none"
 
     const val ACTION_ENTRY_MODE_CHANGED =
         "${BuildConfig.PACKAGE_NAME}.ACTION_ENTRY_MODE_CHANGED"
@@ -43,8 +49,14 @@ object EntryMode {
     private val ENTRY_MODE_URI: Uri =
         Uri.parse("content://$HOSTPREFS_AUTHORITY/$HOSTPREFS_PATH_ENTRY_MODE")
 
+    /** Provider 重新确认的最小间隔，见 [syncFromHostBeforePost] */
+    private const val PROVIDER_SYNC_INTERVAL_MS = 3000L
+
     @Volatile
     private var memoryCache: String? = null
+
+    @Volatile
+    private var lastProviderSyncAt = 0L
 
     fun current(context: Context): String {
         val mode = hostPrefs(context).getString(HostPrefsNames.KEY_ENTRY_MODE, TARGET) ?: TARGET
@@ -73,6 +85,7 @@ object EntryMode {
 
     fun labelRes(mode: String): Int = when (mode) {
         HOST -> R.string.settings_entry_mode_host
+        NONE -> R.string.settings_entry_mode_none
         else -> R.string.settings_entry_mode_target
     }
 
@@ -115,10 +128,35 @@ object EntryMode {
 
     /**
      * 是否展示目标应用通知。
-     * host → 绝不展示；target → 展示。
+     * target → 展示；host / none → 绝不展示。
      */
     fun shouldShowTargetNotification(context: Context? = null): Boolean =
-        !isHostEntryInTarget(context)
+        currentFromModule(context) == TARGET
+
+    /**
+     * 目标进程：若当前认为「应显示通知」，重新向宿主 Provider 确认一次。
+     *
+     * 宿主的 [set] 会广播新值，但广播可能漏投（目标在后台被冻结、宿主拿到的是
+     * 上一次的目标包名等）。结果就是：用户已经选了「不显示通知」，目标进程内存里
+     * 还是旧的 target，通知一直撤不掉。
+     *
+     * 只在「准备展示通知」时才查 Provider，隐藏/本体入口下不做无谓的跨进程查询；
+     * 并按 [PROVIDER_SYNC_INTERVAL_MS] 节流，避免频繁切换 Activity 时打点过密。
+     */
+    fun syncFromHostBeforePost(context: Context? = null) {
+        if (currentFromModule(context) != TARGET) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastProviderSyncAt < PROVIDER_SYNC_INTERVAL_MS) return
+        lastProviderSyncAt = now
+        val app = context?.applicationContext
+            ?: runCatching { AndroidAppCompat.currentApplication() }.getOrNull()
+            ?: return
+        val fresh = readViaProvider(app) ?: return
+        if (fresh != TARGET) {
+            Log.d(TAG, "entry mode changed on host: $TARGET -> $fresh")
+            applyFromHost(app, fresh)
+        }
+    }
 
     /**
      * 是否已从宿主/缓存确认过模式。
@@ -145,7 +183,7 @@ object EntryMode {
             val raw = context.applicationContext
                 .getSharedPreferences(TARGET_CACHE_PREFS, Context.MODE_PRIVATE)
                 .getString(KEY_CACHED_MODE, null)
-            if (raw == HOST || raw == TARGET) raw else null
+            if (raw == HOST || raw == TARGET || raw == NONE) raw else null
         }.getOrNull()
     }
 
@@ -169,8 +207,11 @@ object EntryMode {
         }.getOrNull()
     }
 
-    private fun normalize(raw: String?): String =
-        if (raw == HOST) HOST else TARGET
+    private fun normalize(raw: String?): String = when (raw) {
+        HOST -> HOST
+        NONE -> NONE
+        else -> TARGET
+    }
 
     private fun broadcastChanged(context: Context, mode: String, targetPackage: String?) {
         runCatching {

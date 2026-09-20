@@ -3,11 +3,14 @@ package com.godviewer.app.host.control
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import com.godviewer.app.R
 import com.godviewer.app.host.control.HostControlNotifier
 import com.godviewer.app.host.diag.HostCrashStore
 import com.godviewer.app.host.diag.HostDiagStore
+import com.godviewer.app.host.entry.EntryControlUi
 import com.godviewer.app.shared.GvLog
 import com.godviewer.app.shared.control.HostControlBridge
 import com.godviewer.app.shared.diag.CrashReportProtocol
@@ -108,25 +111,54 @@ open class HostControlReceiverImpl : BroadcastReceiver() {
                 GvLog.d(TAG, "foreground pkg=$pkg edit=$editEnabled")
             }
 
-            HostControlNotifier.ACTION_ENABLE -> {
-                // 与目标通知点击一致：未开 → 开启；已开 → 不操作，只刷新文案
+            HostControlBridge.ACTION_SET_ENTRY_MODE -> {
+                val token = intent.getStringExtra(HostControlBridge.EXTRA_TOKEN)
+                if (token != HostControlBridge.CONTROL_TOKEN) {
+                    GvLog.w(TAG, "reject set entry mode: bad token")
+                    return
+                }
+                val mode = intent.getStringExtra(HostControlBridge.EXTRA_ENTRY_MODE).orEmpty()
+                if (mode.isBlank()) return
+                // 用户在目标通知上点了「隐藏」：宿主偏好同步为 none，并刷新本体通知形态
+                EntryControlUi.setEntryMode(app, mode)
+                GvLog.i(TAG, "entry mode set from target mode=$mode")
+            }
+
+            HostControlNotifier.ACTION_TOGGLE -> {
+                // 与目标通知点击一致：点一下开，再点一下关
                 val target = HostControlBridge.currentTarget(app)
                 if (target == null) {
                     Toast.makeText(app, R.string.host_control_no_target, Toast.LENGTH_SHORT).show()
                     HostControlNotifier.refresh(app)
                     return
                 }
-                if (target.editEnabled) {
-                    GvLog.d(TAG, "enable click: already on pkg=${target.packageName}, refresh only")
-                    HostControlNotifier.refresh(app)
-                    return
-                }
-                val ok = HostControlBridge.dispatchToTarget(app, HostControlBridge.ACTION_ENABLE_EDIT)
-                GvLog.i(TAG, "enable click: dispatch open edit pkg=${target.packageName} ok=$ok")
+                val ok = HostControlBridge.dispatchToTarget(
+                    app,
+                    HostControlBridge.ACTION_TOGGLE_EDIT,
+                )
+                GvLog.i(TAG, "toggle click: dispatch pkg=${target.packageName} ok=$ok")
                 if (!ok) {
                     Toast.makeText(app, R.string.host_control_no_target, Toast.LENGTH_SHORT).show()
                 }
                 HostControlNotifier.refresh(app)
+                // 目标上报是异步的，稍后再刷一次，拿到真实开关状态
+                refreshLater(app)
+            }
+
+            HostControlNotifier.ACTION_HIDE -> {
+                // 与目标通知的「隐藏」一致：入口改为不显示通知，并退出目标编辑模式
+                val target = HostControlBridge.currentTarget(app)
+                GvLog.i(TAG, "hide click pkg=${target?.packageName}")
+                if (target != null && target.editEnabled) {
+                    val ok = HostControlBridge.dispatchToTarget(
+                        app,
+                        HostControlBridge.ACTION_DISABLE_EDIT,
+                    )
+                    GvLog.i(TAG, "hide click: disable edit dispatch ok=$ok")
+                }
+                EntryControlUi.setEntryMode(app, EntryMode.NONE)
+                HostControlNotifier.cancel(app)
+                Toast.makeText(app, R.string.edit_mode_hidden_toast, Toast.LENGTH_LONG).show()
             }
 
             HostControlNotifier.ACTION_UNDO,
@@ -146,7 +178,19 @@ open class HostControlReceiverImpl : BroadcastReceiver() {
         }
     }
 
+    /** 目标上报是异步广播，延迟再刷一次通知，让正文反映真实状态。 */
+    private fun refreshLater(context: Context) {
+        runCatching {
+            Handler(Looper.getMainLooper()).postDelayed({
+                HostControlNotifier.refresh(context.applicationContext)
+            }, REFRESH_DELAY_MS)
+        }.onFailure {
+            GvLog.w(TAG, "schedule refresh failed", it)
+        }
+    }
+
     companion object {
         private const val TAG = "Control"
+        private const val REFRESH_DELAY_MS = 600L
     }
 }

@@ -22,14 +22,24 @@ object HostControlBridge {
         "${BuildConfig.PACKAGE_NAME}.ACTION_TARGET_FOREGROUND"
     const val ACTION_ENABLE_EDIT =
         "${BuildConfig.PACKAGE_NAME}.ACTION_ENABLE_EDIT"
+    /** 宿主 → 目标：开关编辑模式（目标按自身状态取反） */
+    const val ACTION_TOGGLE_EDIT =
+        "${BuildConfig.PACKAGE_NAME}.ACTION_TOGGLE_EDIT"
+    /** 宿主 → 目标：强制退出编辑模式（通知被隐藏时用） */
+    const val ACTION_DISABLE_EDIT =
+        "${BuildConfig.PACKAGE_NAME}.ACTION_DISABLE_EDIT"
     const val ACTION_UNDO =
         "${BuildConfig.PACKAGE_NAME}.ACTION_UNDO"
     const val ACTION_MANAGE_RULES =
         "${BuildConfig.PACKAGE_NAME}.ACTION_MANAGE_RULES"
+    /** 目标 → 宿主：回写入口模式（目标通知「隐藏」按钮触发） */
+    const val ACTION_SET_ENTRY_MODE =
+        "${BuildConfig.PACKAGE_NAME}.ACTION_SET_ENTRY_MODE"
 
     const val EXTRA_PACKAGE = "package_name"
     const val EXTRA_LABEL = "app_label"
     const val EXTRA_EDIT_ENABLED = "edit_enabled"
+    const val EXTRA_ENTRY_MODE = "entry_mode"
     const val EXTRA_TOKEN = "token"
     const val CONTROL_TOKEN = "godviewer-host-control-v1"
 
@@ -64,6 +74,25 @@ object HostControlBridge {
             Log.d(TAG, "reportForeground pkg=$packageName edit=$editEnabled")
         }.onFailure {
             Log.w(TAG, "reportForeground failed", it)
+        }
+    }
+
+    /**
+     * 目标 → 宿主：回写入口模式。
+     * best-effort：宿主未存活时目标靠自己的本地缓存保持「不显示通知」。
+     */
+    fun reportEntryMode(context: Context, mode: String) {
+        runCatching {
+            val app = context.applicationContext
+            val intent = Intent(ACTION_SET_ENTRY_MODE).apply {
+                component = ComponentName(BuildConfig.PACKAGE_NAME, HOST_RECEIVER)
+                putExtra(EXTRA_ENTRY_MODE, mode)
+                putExtra(EXTRA_TOKEN, CONTROL_TOKEN)
+            }
+            app.sendBroadcast(intent)
+            Log.d(TAG, "reportEntryMode mode=$mode")
+        }.onFailure {
+            Log.w(TAG, "reportEntryMode failed", it)
         }
     }
 

@@ -182,10 +182,11 @@ class SettingsFragment : Fragment() {
 
     private fun showEntryModePicker() {
         val ctx = requireContext()
-        val modes = arrayOf(EntryMode.TARGET, EntryMode.HOST)
+        val modes = arrayOf(EntryMode.TARGET, EntryMode.HOST, EntryMode.NONE)
         val labels = arrayOf(
             getString(R.string.settings_entry_mode_target),
             getString(R.string.settings_entry_mode_host),
+            getString(R.string.settings_entry_mode_none),
         )
         val current = EntryMode.current(ctx)
         val checked = modes.indexOf(current).coerceAtLeast(0)
@@ -195,13 +196,28 @@ class SettingsFragment : Fragment() {
                 val selected = modes[which]
                 dialog.dismiss()
                 if (selected == current) return@setSingleChoiceItems
-                if (selected == EntryMode.HOST) {
-                    maybeRequestNotificationThenHostEntry()
-                } else {
-                    EntryControlUi.setEntryMode(ctx, EntryMode.TARGET)
-                    refreshEntryModeValue()
-                    Toast.makeText(ctx, R.string.settings_entry_mode_target_toast, Toast.LENGTH_SHORT)
-                        .show()
+                when (selected) {
+                    EntryMode.HOST -> maybeRequestNotificationThenHostEntry()
+
+                    EntryMode.NONE -> {
+                        EntryControlUi.setEntryMode(ctx, EntryMode.NONE)
+                        refreshEntryModeValue()
+                        Toast.makeText(
+                            ctx,
+                            R.string.settings_entry_mode_none_toast,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+
+                    else -> {
+                        EntryControlUi.setEntryMode(ctx, EntryMode.TARGET)
+                        refreshEntryModeValue()
+                        Toast.makeText(
+                            ctx,
+                            R.string.settings_entry_mode_target_toast,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
                 }
             }
             .setNegativeButton(R.string.cancel, null)
