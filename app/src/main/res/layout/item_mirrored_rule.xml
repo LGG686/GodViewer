@@ -21,7 +21,18 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:padding="12dp">
+        android:paddingStart="6dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="12dp">
+
+        <CheckBox
+            android:id="@+id/ruleCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:paddingStart="0dp"
+            android:paddingEnd="2dp" />
 
         <ImageView
             android:id="@+id/ruleThumb"
@@ -61,5 +72,16 @@
                 android:textSize="12sp"
                 tools:text="12:30:01" />
         </LinearLayout>
+
+        <Button
+            android:id="@+id/ruleDelete"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:minWidth="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:text="@string/delete"
+            android:textSize="12sp" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView>

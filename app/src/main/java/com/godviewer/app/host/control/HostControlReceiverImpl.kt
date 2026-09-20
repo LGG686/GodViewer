@@ -9,6 +9,7 @@ import android.widget.Toast
 import com.godviewer.app.R
 import com.godviewer.app.host.backup.RuleBackupDelivery
 import com.godviewer.app.host.control.HostControlNotifier
+import com.godviewer.app.host.manage.RuleCommandDelivery
 import com.godviewer.app.host.diag.HostCrashStore
 import com.godviewer.app.host.diag.HostDiagStore
 import com.godviewer.app.host.entry.EntryControlUi
@@ -108,6 +109,9 @@ open class HostControlReceiverImpl : BroadcastReceiver() {
                 // 该目标有未下发的备份导入：目标起来了，补发一次（重复导入幂等）
                 runCatching { RuleBackupDelivery.flush(app, pkg) }
                     .onFailure { GvLog.w(TAG, "flush pending import failed", it) }
+                // 同上：管理指令（删除 / 显示隐藏 / 改文字 / 还原）排在 pending 里的也补发
+                runCatching { RuleCommandDelivery.flush(app, pkg) }
+                    .onFailure { GvLog.w(TAG, "flush pending rule commands failed", it) }
                 // 把当前入口模式推回目标，避免目标进程读不到 prefs 仍发自己的通知
                 EntryMode.pushToTarget(app, pkg)
                 // 仅本体入口展示控制通知；目标入口下 refresh 内部会 cancel

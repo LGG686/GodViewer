@@ -29,12 +29,15 @@ internal object ThumbnailSync {
     /**
      * 回放补抓到新缩略图后调用（主线程）。限频未到时**不清空**待推集合，
      * 留到下次一起推。
+     *
+     * @param force 跳过限频。宿主发起的管理操作（改文字 / 显示 / 还原）依赖这一步把
+     *   「改完之后的样子」推给宿主列表，被 10 分钟限频吃掉的话整个闭环等于没有。
      */
-    fun flushNewThumbnails(context: Context) {
+    fun flushNewThumbnails(context: Context, force: Boolean = false) {
         runCatching {
             if (ViewRuleThumbnails.pendingCount() == 0) return
             val now = System.currentTimeMillis()
-            if (now - lastPushAt < MIN_INTERVAL_MS) return
+            if (!force && now - lastPushAt < MIN_INTERVAL_MS) return
             lastPushAt = now
             val newThumbs = ViewRuleThumbnails.drainPendingNew()
             if (newThumbs.isEmpty()) return

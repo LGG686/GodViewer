@@ -168,6 +168,39 @@ Backup before large moves: desktop `GodViewer-backup-pre-optimize-*` +
   layout can still point at a neighbour. Do not quietly drop those caveats from user-facing copy
   — `Undo last restore` is the escape hatch and every mention of the feature should keep it
   visible.
+- **Host-side rule management** (4.3.6): the host rules pages are no longer read-only. Supported
+  ops are exactly `delete` / `visibility` / `text` / `restore` (adding new rules from the host is
+  deliberately **not** implemented — the host has no screen-accurate view tree to pick from).
+  Do not move whole rules over the bridge: only `op` + the rule key + guards + payload go out
+  (`shared/control/RuleCommand`, action `HostControlBridge.ACTION_EDIT_RULES`), because a single
+  broadcast has a ~1 MB binder limit and batched thumbnails already saturate it during restore.
+  `ViewRuleManager.applyHostCommands` owns the target side; `host/manage/RuleMirrorManage` owns
+  the host side (mirror edit → command → deliver).
+  Three invariants hold it together and none may be dropped:
+  - `expectedTimestamp`: the host holds a possibly stale mirror, so the target refuses a command
+    whose rule `timestamp` differs (`stale++`) and, when nothing applied, calls
+    `pushCurrentToHost()` so the host UI self-corrects. `stamp` is therefore **assigned by the
+    host** and written to both sides — otherwise clock/timezone skew makes it fail for itself.
+  - `imported` / `batchId` are **not** cleared here (unlike the target's own `saveRule`). The host
+    edits a *list*; it never confirmed to the user which control is which, so downgrading an
+    imported rule to "trust position" would undo exactly what `findViewBestMatch` distrusts.
+  - After any applied change the target re-replays and **force**-flushes thumbnails
+    (`ThumbnailSync.flushNewThumbnails(force = true)`, bypassing the 10-minute throttle), so the
+    host list shows the *post-edit* look; rules whose visibility is `GONE` are skipped so they
+    keep the pre-hide picture (a GONE view cannot be captured).
+  Commands are queued in `filesDir/godviewer/pending_cmds/<pkg>.json`
+  (`host/manage/RuleCommandStore`, merged by key+op, capped at 200) because the target receiver is
+  registered in `Application.onCreate` and misses broadcasts while the process is dead; the queue
+  flushes on `ACTION_TARGET_FOREGROUND` next to `RuleBackupDelivery.flush`. Redelivery is idempotent
+  (a mismatched timestamp is skipped). Never claim "applied" in the UI — `ManageResult.dispatched`
+  decides between "applied" and "queued until you reopen the app", and
+  `RuleMirrorManage.pendingCount` drives the list hint.
+  The mirror is updated **optimistically** (`RuleMirrorStore.saveManagedRules`, whole-file rewrite
+  plus pruning orphan thumbs), so a delete removes the row immediately.
+- Notification "Manage rules" (`TargetControlReceiver.ACTION_MANAGE_RULES`) used to be dropped
+  whenever no `resumedActivity` existed, which reads as a dead button on OEM-restricted builds.
+  It now parks itself via `ActivityLifecycleHooker.requestManageRulesDialog()` (60 s TTL) and the
+  dialog opens 200 ms after the next `onPostResume`. Keep the `isFinishing`/`isDestroyed` guard.
 - Host entry/control: `EntryMode` (`target` vs `host` vs `none`), `HostPrefs` + `HostPrefsProvider`
   (`content://com.godviewer.app.hostprefs/...`), control token `godviewer-host-control-v1`
   (soft guard, not crypto).

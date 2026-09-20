@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.view.View
 import android.widget.TextView
 import com.godviewer.app.shared.GvLog
+import com.godviewer.app.shared.control.RuleCommand
+import com.godviewer.app.shared.control.RuleCommandProtocol
 import com.godviewer.app.shared.model.ViewRule
 import com.godviewer.app.target.mirror.ThumbnailSync
 import com.godviewer.app.target.rule.findViewBestMatch
@@ -227,11 +229,184 @@ object ViewRuleManager {
     /** 当前全部规则（规则管理列表使用） */
     fun allRules(): List<ViewRule> = rules
 
+    /**
+     * 执行宿主下发的管理指令（删除 / 显示隐藏 / 改文字 / 还原）。
+     *
+     * 与本机编辑的区别有两点，都不能省：
+     * - **时间戳守卫**：宿主手里是镜像，可能过期。[RuleCommand.expectedTimestamp] 对不上就跳过，
+     *   并在没有任何改动时把本地真相推回去，让宿主的 UI 自己纠偏。
+     * - **保留 [ViewRule.imported] / [ViewRule.batchId]**：宿主编的是列表不是界面，它没有替用户
+     *   「确认过这个控件」，所以不能像 [saveRule] 那样把外来规则降级成本机规则。
+     *
+     * @return 各计数：applied 实际改动、stale 时间戳不匹配、missing 本地已无此规则
+     */
+    fun applyHostCommands(
+        commands: List<RuleCommand>,
+        restoreIn: Collection<Activity>,
+    ): RuleCommandResult {
+        if (commands.isEmpty()) return RuleCommandResult(0, 0, 0)
+        val before = rules
+        var working = rules
+        var applied = 0
+        var stale = 0
+        var missing = 0
+        val appliedKeys = LinkedHashSet<ViewRule.RuleKey>()
+        val now = System.currentTimeMillis()
+
+        for (cmd in commands) {
+            val op = cmd.op?.takeIf { it.isNotBlank() } ?: continue
+            val key = cmd.ruleKey() ?: continue
+            val rule = working.firstOrNull { it.key() == key }
+            if (rule == null) {
+                missing++
+                continue
+            }
+            val expected = cmd.expectedTimestamp
+            if (expected > 0L && rule.timestamp != expected) {
+                stale++
+                continue
+            }
+            when (op) {
+                RuleCommandProtocol.OP_DELETE -> {
+                    for (activity in restoreIn) {
+                        runCatching {
+                            findViewBestMatch(activity, rule)?.let {
+                                ViewRuleApplier.restoreView(it, rule)
+                            }
+                        }.onFailure {
+                            GvLog.w(TAG, "restore before host delete failed key=$key", it)
+                        }
+                    }
+                    ViewRuleApplier.forgetAppliedImage(rule)
+                    ViewRuleThumbnails.remove(rule)
+                    working = working.filterNot { it.key() == key }
+                    applied++
+                }
+                else -> {
+                    val updated = rule.copy()
+                    val changed = when (op) {
+                        RuleCommandProtocol.OP_VISIBILITY -> {
+                            val target = cmd.visibility ?: continue
+                            updated.modified = rule.modified.copy(visibility = target)
+                            updated.changedVisibility = true
+                            true
+                        }
+                        RuleCommandProtocol.OP_TEXT -> {
+                            val target = cmd.text ?: continue
+                            updated.modified = rule.modified.copy(text = target)
+                            updated.changedText = true
+                            true
+                        }
+                        RuleCommandProtocol.OP_RESTORE -> {
+                            for (activity in restoreIn) {
+                                runCatching {
+                                    findViewBestMatch(activity, rule)?.let {
+                                        ViewRuleApplier.restoreView(it, rule)
+                                    }
+                                }.onFailure {
+                                    GvLog.w(TAG, "host restore view failed key=$key", it)
+                                }
+                            }
+                            ViewRuleApplier.forgetAppliedImage(updated)
+                            // 图片 URL 本来就不可还原，只退回 original 快照（含 scaleType）
+                            updated.modified = rule.original.copy()
+                            updated.changedSize = false
+                            updated.changedMargin = false
+                            updated.changedPadding = false
+                            updated.changedVisibility = false
+                            updated.changedText = false
+                            updated.changedImage = false
+                            true
+                        }
+                        else -> false
+                    }
+                    if (!changed) continue
+                    updated.timestamp = if (cmd.stamp > 0L) cmd.stamp else now
+                    working = working.map { if (it.key() == key) updated else it }
+                    appliedKeys.add(key)
+                    applied++
+                }
+            }
+        }
+
+        if (applied == 0) {
+            // 全是过期指令：把本地真相推回去，宿主的列表会自己纠偏，不用等下一次 replay
+            if (stale > 0 || missing > 0) pushCurrentToHost()
+            return RuleCommandResult(applied, stale, missing, emptySet())
+        }
+
+        pushUndoState(before)
+        rules = working
+        store?.save(rules)
+        // 回推全量 key 列表：删除过的规则缩略图由宿主清掉（宿主也会自己清理，双保险）
+        appContext?.let { ThumbnailSync.syncKeySetAfterDelete(it, rules) }
+        GvLog.i(
+            TAG,
+            "host commands applied=$applied stale=$stale missing=$missing total=${rules.size}",
+        )
+        return RuleCommandResult(applied, stale, missing, appliedKeys)
+    }
+
+    /**
+     * 重抓规则的缩略图（先丢旧图再抓），让宿主列表看到**改完之后**的样子。
+     *
+     * 隐藏类规则跳过：视图已经是 GONE，[ViewSnapshot] 抓不到东西，旧图（控件原本的样子）
+     * 反而更有用。抓到的图由调用方 [ThumbnailSync.flushNewThumbnails] 立刻回推。
+     *
+     * @return 本次新抓到的张数
+     */
+    fun refreshThumbnails(keys: Collection<ViewRule.RuleKey>, activities: Collection<Activity>): Int {
+        if (keys.isEmpty() || activities.isEmpty()) return 0
+        var captured = 0
+        for (key in keys) {
+            val rule = rules.firstOrNull { it.key() == key } ?: continue
+            if (rule.modified.visibility == View.GONE) continue
+            for (activity in activities) {
+                val view = runCatching { findViewBestMatch(activity, rule) }.getOrNull()
+                    ?: continue
+                ViewRuleThumbnails.remove(rule)
+                if (ViewRuleThumbnails.capture(view, rule)) captured++
+                break
+            }
+        }
+        return captured
+    }
+
+    /** 把当前规则推给宿主镜像（宿主 UI 与本地不一致时的纠偏手段）。 */
+    private fun pushCurrentToHost() {
+        val ctx = appContext ?: return
+        runCatching {
+            com.godviewer.app.data.RuleMirror.pushFromTarget(
+                ctx,
+                rules.firstOrNull()?.packageName ?: ctx.packageName,
+                rules,
+            )
+        }.onFailure {
+            GvLog.w(TAG, "push truth to host failed", it)
+        }
+    }
+
+    /** 一次管理指令批次的执行结果。 */
+    data class RuleCommandResult(
+        val applied: Int,
+        val stale: Int,
+        val missing: Int,
+        /** 实际改动过的规则键（已删除的不在内），调用方据此重抓缩略图。 */
+        val appliedKeys: Set<ViewRule.RuleKey> = emptySet(),
+    )
+
+    private fun RuleCommand.ruleKey(): ViewRule.RuleKey? {
+        val activity = activityClass?.takeIf { it.isNotBlank() } ?: return null
+        val view = viewClass?.takeIf { it.isNotBlank() } ?: return null
+        val path = depth?.takeIf { it.isNotEmpty() } ?: return null
+        return ViewRule.RuleKey(activity, path, view)
+    }
+
     /** 是否有可撤销的操作 */
     fun canUndo(): Boolean = undoStack.isNotEmpty()
 
-    private fun pushUndoState() {
-        undoStack.addLast(rules)
+    private fun pushUndoState(state: List<ViewRule> = rules) {
+        undoStack.addLast(state)
         if (undoStack.size > MAX_UNDO_STEPS) {
             undoStack.removeFirst()
         }

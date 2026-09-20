@@ -12,11 +12,13 @@ import android.util.Base64
 import com.godviewer.app.shared.GvLog
 import com.godviewer.app.shared.backup.ThumbPayload
 import com.godviewer.app.shared.control.HostControlBridge
+import com.godviewer.app.shared.control.RuleCommand
 import com.godviewer.app.shared.entry.EntryMode
 import com.godviewer.app.shared.model.ViewRule
 import com.godviewer.app.target.edit.EditMode
 import com.godviewer.app.target.edit.EditModeNotification
 import com.godviewer.app.target.hook.hookers.ActivityLifecycleHooker
+import com.godviewer.app.target.mirror.ThumbnailSync
 import com.godviewer.app.target.rule.ViewRuleManager
 import com.godviewer.app.target.rule.ViewRuleThumbnails
 import com.godviewer.app.target.ui.RuleManagerDialog
@@ -68,12 +70,55 @@ object TargetControlReceiver {
                     HostControlBridge.ACTION_MANAGE_RULES -> {
                         val activity = ActivityLifecycleHooker.resumedActivity()
                         if (activity == null) {
-                            GvLog.d(TAG, "manage rules: no resumed activity")
+                            // 目标还没回到前台（或厂商的后台弹窗限制让这次拿不到窗口）：
+                            // 旧实现在这里直接丢弃，用户看到的就是「点了没反应」。
+                            // 改成留一张请求条，下一个 Activity resume 时补弹。
+                            GvLog.d(TAG, "manage rules: no resumed activity, deferred")
+                            ActivityLifecycleHooker.requestManageRulesDialog()
                             return
                         }
                         Handler(Looper.getMainLooper()).post {
                             runCatching { RuleManagerDialog(activity).show() }
                                 .onFailure { GvLog.e(TAG, "show rule manager failed", it) }
+                        }
+                    }
+                    HostControlBridge.ACTION_EDIT_RULES -> {
+                        val json = intent.getStringExtra(HostControlBridge.EXTRA_COMMANDS_JSON)
+                        if (json.isNullOrBlank()) return
+                        val commands = runCatching {
+                            Gson().fromJson(json, Array<RuleCommand>::class.java)?.toList()
+                        }.getOrNull().orEmpty()
+                        if (commands.isEmpty()) {
+                            GvLog.w(TAG, "rule commands: empty payload")
+                            return
+                        }
+                        val live = ActivityLifecycleHooker.liveActivities()
+                        val app = context.applicationContext
+                        Handler(Looper.getMainLooper()).post {
+                            runCatching {
+                                val result = ViewRuleManager.applyHostCommands(commands, live)
+                                GvLog.i(
+                                    TAG,
+                                    "rule commands applied=${result.applied} " +
+                                        "stale=${result.stale} missing=${result.missing}",
+                                )
+                                if (result.applied > 0) {
+                                    ActivityLifecycleHooker.replayCurrent(
+                                        ActivityLifecycleHooker.resumedActivity(),
+                                    )
+                                    // 把「改完之后」的样子回推给宿主列表；此处必须绕开
+                                    // 10 分钟限频，否则宿主侧永远看不到这次改动的结果
+                                    val captured = ViewRuleManager.refreshThumbnails(
+                                        result.appliedKeys,
+                                        ActivityLifecycleHooker.liveActivities(),
+                                    )
+                                    if (captured > 0) {
+                                        ThumbnailSync.flushNewThumbnails(app, force = true)
+                                    }
+                                }
+                            }.onFailure {
+                                GvLog.e(TAG, "apply rule commands failed", it)
+                            }
                         }
                     }
                     HostControlBridge.ACTION_IMPORT_RULES -> {
@@ -172,6 +217,7 @@ object TargetControlReceiver {
             addAction(HostControlBridge.ACTION_IMPORT_RULES)
             addAction(HostControlBridge.ACTION_IMPORT_THUMBS)
             addAction(HostControlBridge.ACTION_UNDO_IMPORT)
+            addAction(HostControlBridge.ACTION_EDIT_RULES)
             addAction(EntryMode.ACTION_ENTRY_MODE_CHANGED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

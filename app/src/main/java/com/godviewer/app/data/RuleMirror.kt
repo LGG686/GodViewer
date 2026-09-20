@@ -84,6 +84,19 @@ object RuleMirror {
         return com.godviewer.app.host.mirror.RuleMirrorStore.deletePackage(context, packageName)
     }
 
+    /** 宿主侧：管理操作写回整份规则（乐观更新 + 清孤儿缩略图）。 */
+    fun saveManagedRules(
+        context: Context,
+        packageName: String,
+        rules: List<ViewRule>,
+    ): Boolean {
+        return com.godviewer.app.host.mirror.RuleMirrorStore.saveManagedRules(
+            context,
+            packageName,
+            rules,
+        )
+    }
+
     fun listPackages(context: Context): List<MirroredPackage> {
         return com.godviewer.app.host.mirror.RuleMirrorStore.listPackages(context)
     }

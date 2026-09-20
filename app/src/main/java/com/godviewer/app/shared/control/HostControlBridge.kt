@@ -44,6 +44,14 @@ object HostControlBridge {
     /** 宿主 → 目标：撤销一整批导入（按 batch id 整批移除） */
     const val ACTION_UNDO_IMPORT =
         "${BuildConfig.PACKAGE_NAME}.ACTION_UNDO_IMPORT"
+    /**
+     * 宿主 → 目标：执行规则管理指令（删除 / 显示隐藏 / 改文字 / 还原）。
+     *
+     * 显式指定包名下发：管理卡片从「应用规则」页面发起，与目标是否进过编辑模式、
+     * 通知是否隐藏无关。每条指令带 [RuleCommand.expectedTimestamp] 守卫。
+     */
+    const val ACTION_EDIT_RULES =
+        "${BuildConfig.PACKAGE_NAME}.ACTION_EDIT_RULES"
 
     const val EXTRA_PACKAGE = "package_name"
     const val EXTRA_LABEL = "app_label"
@@ -52,6 +60,7 @@ object HostControlBridge {
     const val EXTRA_RULES_JSON = "rules_json"
     const val EXTRA_THUMBS_JSON = "thumbs_json"
     const val EXTRA_BATCH_ID = "batch_id"
+    const val EXTRA_COMMANDS_JSON = "commands_json"
     const val EXTRA_TOKEN = "token"
     const val CONTROL_TOKEN = "godviewer-host-control-v1"
 
@@ -244,6 +253,35 @@ object HostControlBridge {
             true
         }.onFailure {
             Log.w(TAG, "dispatch undo import failed", it)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * 宿主 → 指定目标：下发规则管理指令。
+     *
+     * 目标未运行时广播会丢，由调用方先把指令写进 pending，等目标上报前台再补发
+     * （[com.godviewer.app.host.manage.RuleCommandDelivery.flush]）。
+     * 重复下发是无害的：[RuleCommand.expectedTimestamp] 对不上时目标直接跳过。
+     */
+    fun dispatchRuleCommands(
+        context: Context,
+        packageName: String,
+        commandsJson: String,
+    ): Boolean {
+        val safePkg = packageName.trim()
+        if (safePkg.isEmpty() || commandsJson.isBlank()) return false
+        return runCatching {
+            val intent = Intent(ACTION_EDIT_RULES).apply {
+                setPackage(safePkg)
+                putExtra(EXTRA_TOKEN, CONTROL_TOKEN)
+                putExtra(EXTRA_PACKAGE, safePkg)
+                putExtra(EXTRA_COMMANDS_JSON, commandsJson)
+            }
+            context.applicationContext.sendBroadcast(intent)
+            Log.d(TAG, "rule commands dispatched -> $safePkg (${commandsJson.length} chars)")
+            true
+        }.onFailure {
+            Log.w(TAG, "dispatch rule commands failed", it)
         }.getOrDefault(false)
     }
 

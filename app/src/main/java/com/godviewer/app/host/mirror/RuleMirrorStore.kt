@@ -154,6 +154,55 @@ internal object RuleMirrorStore {
         }.getOrDefault(false)
     }
 
+    /**
+     * 管理操作写回镜像：整份覆盖规则列表，顺带清掉不再有对应规则的孤儿缩略图。
+     *
+     * 这是**乐观更新**——目标可能还没收到指令。收敛靠两条路：目标在线会立刻重推自己的
+     * 真相；目标离线则靠 pending 指令在下一次前台补发。用户此刻看到的是自己刚做的事，
+     * 比看着列表纹丝不动却悄悄待生效要诚实。
+     */
+    fun saveManagedRules(context: Context, packageName: String, rules: List<ViewRule>): Boolean {
+        val safePkg = sanitizeMirrorPackageName(packageName) ?: return false
+        if (rules.isEmpty()) {
+            return deletePackage(context, safePkg)
+        }
+        return runCatching {
+            val dir = packageDir(context, safePkg)
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            val rulesFile = File(dir, RuleMirrorProtocol.RULES_FILE)
+            val existingLabel = runCatching {
+                gson.fromJson(rulesFile.readText(), MirrorFile::class.java)
+            }.getOrNull()?.appLabel
+            val stored = MirrorFile(
+                schemaVersion = 1,
+                packageName = safePkg,
+                appLabel = existingLabel?.takeIf { it.isNotBlank() },
+                updatedAt = System.currentTimeMillis(),
+                appIconPngBase64 = null,
+                thumbnails = null,
+                rules = rules,
+            )
+            val tmp = File(dir, "${RuleMirrorProtocol.RULES_FILE}.tmp")
+            FileOutputStream(tmp).use { out ->
+                out.write(gson.toJson(stored).toByteArray(Charsets.UTF_8))
+                out.fd.sync()
+            }
+            if (!tmp.renameTo(rulesFile)) {
+                tmp.copyTo(rulesFile, overwrite = true)
+                tmp.delete()
+            }
+            val keep = rules.map { mirrorThumbnailKey(it) }.toSet()
+            val thumbDir = File(dir, RuleMirrorProtocol.THUMB_DIR)
+            thumbDir.listFiles()?.forEach { f ->
+                if (f.name.removeSuffix(".png") !in keep) f.delete()
+            }
+            GvLog.d(TAG, "mirror rewritten: $safePkg rules=${rules.size}")
+            true
+        }.getOrDefault(false)
+    }
+
     /** 某包镜像里已落盘的缩略图（key → 文件），供备份导出读取。 */
     /** 删除指定 key 的镜像缩略图（撤销导入 / 删除规则时清孤儿用）。 */
     fun deleteThumbnails(context: Context, packageName: String, keys: Collection<String>): Int {

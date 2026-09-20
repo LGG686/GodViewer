@@ -1,11 +1,15 @@
 package com.godviewer.app.target.hook.hookers
 
 import android.app.Activity
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.ViewTreeObserver
 import com.godviewer.app.shared.GvLog
 import com.godviewer.app.target.dialog.ModuleDialogUi
 import com.godviewer.app.target.edit.EditModeNotification
 import com.godviewer.app.target.edit.SelectedViewHighlight
+import com.godviewer.app.target.ui.RuleManagerDialog
 import com.godviewer.app.target.hook.GvHook
 import com.godviewer.app.target.hook.GvMethodHook
 import com.godviewer.app.target.hook.IHooker
@@ -39,9 +43,35 @@ class ActivityLifecycleHooker : IHooker {
         private val liveActivities =
             Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
 
+        /** 待处理的「打开规则管理」请求时间戳（0 = 无）。 */
+        @Volatile
+        private var manageRulesRequestedAt = 0L
+
+        /** 弹窗请求的有效期：太久之前的点击不该在无关界面上突然弹出来。 */
+        private const val MANAGE_RULES_REQUEST_TTL_MS = 60_000L
+
         fun resumedActivity(): Activity? = resumedActivity
 
         fun liveActivities(): Set<Activity> = liveActivities
+
+        /**
+         * 请求在下一个前台 Activity 上打开规则管理弹窗。
+         *
+         * 通知栏点「规则」时目标常常还没回到前台（或在厂商的后台弹窗限制下拿不到可用的
+         * 窗口），旧实现直接把这次点击丢掉，用户看到的就是「点了没反应」。改成记一笔请求，
+         * 下一个 Activity resume 时补弹 —— 代价只是弹窗晚几百毫秒，比丢掉强得多。
+         */
+        fun requestManageRulesDialog() {
+            manageRulesRequestedAt = System.currentTimeMillis()
+        }
+
+        /** 取出待处理的弹窗请求（超过 [MANAGE_RULES_REQUEST_TTL_MS] 视为过期）。 */
+        private fun consumeManageRulesRequest(): Boolean {
+            val requestedAt = manageRulesRequestedAt
+            if (requestedAt == 0L) return false
+            manageRulesRequestedAt = 0L
+            return System.currentTimeMillis() - requestedAt <= MANAGE_RULES_REQUEST_TTL_MS
+        }
 
         /**
          * 对指定 Activity 重放规则（导入规则后立刻生效用）。
@@ -81,6 +111,20 @@ class ActivityLifecycleHooker : IHooker {
                     .onFailure { GvLog.w(TAG, "flush new thumbnails failed", it) }
             }
         }
+        /** 有补弹请求时延迟一小会儿弹出：等 Activity 布局稳定，避免 BadToken。 */
+        private fun maybeShowRuleManager(activity: Activity) {
+            if (!consumeManageRulesRequest()) return
+            Handler(Looper.getMainLooper()).postDelayed({
+                runCatching {
+                    if (activity.isFinishing || (Build.VERSION.SDK_INT >= 17 && activity.isDestroyed)) {
+                        return@postDelayed
+                    }
+                    RuleManagerDialog(activity).show()
+                }.onFailure {
+                    GvLog.e(TAG, "deferred rule manager dialog failed", it)
+                }
+            }, 200L)
+        }
     }
 
     override fun onHook() {
@@ -99,6 +143,7 @@ class ActivityLifecycleHooker : IHooker {
                         ModuleDialogUi.noteResumedActivity(activity)
                         replay(activity, captureThumbs = true)
                         registerLayoutListener(activity)
+                        maybeShowRuleManager(activity)
                         // 回到前台时按宿主最新入口模式刷新通知：
                         // 宿主改设置后的广播可能漏投，这里兜底撤掉已隐藏的通知
                         EditModeNotification.refresh(activity.application)
